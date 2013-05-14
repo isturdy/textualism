@@ -1,0 +1,29 @@
+name:                textualism
+version:             0.1.0.0
+synopsis:            A conversion-focused lightweight markup language.
+description:
+homepage:            https://github.com/isturdy/textualism
+license:             MIT
+license-file:        LICENSE
+author:              Ian Sturdy
+maintainer:          sturdyi12@mail.wlu.edu
+category:            Text
+build-type:          Simple
+cabal-version:       >=1.8
+stability:	     experimental
+
+library
+  exposed-modules:
+    Text.Textualism
+  GHC-Options:
+    -Wall
+
+  build-depends:
+    base ==4.*,
+    blaze-html >=0.5 && <0.7,
+    blaze-markup >=0.5.1 && <0.6,
+    text ==0.11.*
+
+source-repository head
+  type: git
+  location: https://github.com/isturdy/textualism
