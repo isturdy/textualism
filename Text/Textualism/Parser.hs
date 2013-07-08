@@ -44,11 +44,26 @@ warn :: Warning -> Parser ()
 warn w = modifyState (warnings %~ (w:))
 
 -- Random parsec utilities
+litspace :: Parser ()
+litspace = void $ char ' '
+
 eol :: Parser ()
 eol = void $ char '\n' <|> (char '\r' <* optional (char '\n'))
 
+blankline :: Parser ()
+blankline = many space *> eol
+
 indent :: Parser Int
-indent = lookAhead (length <$> many (char ' '))
+indent = lookAhead (length <$> many litspace)
+
+indentSame :: Parser ()
+indentSame = void $ getIndent >>= flip count litspace
+
+indentNew :: Parser ()
+indentNew = void $ many litspace >>= pushIndent . length
+
+paragraphBreak :: Parser ()
+paragraphBreak = eol *> blankline *> indentSame
 
 notSpecial :: Parser Char
 notSpecial = undefined
@@ -56,7 +71,7 @@ notSpecial = undefined
 -- | Parse a line and push its indent onto the stack. Used for everything
 -- except explicit blocks, which may have an indented first line.
 newIndentLine :: Parser Block
-newIndentLine =
+newIndentLine = undefined
 -- Pull the indents off a section of text.
 --unindent :: Int -> Text -> Text
 --unindent n = T.concat . fmap (T.take n) . T.lines

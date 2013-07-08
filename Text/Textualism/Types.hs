@@ -6,6 +6,10 @@ import           Data.Map      (Map)
 import qualified Data.Map      as M
 import           Data.Text     hiding (foldl')
 
+data Indent = Same
+            | Dedent Int
+            | Indent Int
+
 data Document = Document Header [Block]
                 deriving (Show)
 
