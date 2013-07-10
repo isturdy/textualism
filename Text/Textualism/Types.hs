@@ -26,8 +26,16 @@ data HValue = VList [Span]
 
 data Block = Block
            | BSpan Span
-           | BLit [Text] Text
+           | BLit {
+               bid     :: Maybe Id
+             , classes :: [Text]
+             , content :: Text
+             }
            deriving (Show)
+
+data Id = FootnoteId Text
+        | BlockId    Text
+          deriving (Show)
 
 data Span = Span
           deriving (Show)
