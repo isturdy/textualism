@@ -3,7 +3,7 @@
 ## Design goals:
 + Design for writing and editing, not end-user readability.
 + Be extensible: syntax is more readable and portable than raw html.
-+ Invisible whitespace is insignificant (and tabs are illegal).
++ Trailing whitespace is ignored.
 + Have explicit syntax with minimal special cases and exceptions.
 
 ## Indentation notes:
@@ -12,33 +12,42 @@
   + Current: the primary indentation level of the current block.
   + Dedent: less indented than the current indent; must be the current indentation of an ancestor block.
 + A dedent closes all blocks within the ancestor of the same indentation.
-+ A block takes its indentation from the least-indented element.
++ The indentation of an indent block is taken from the first element
+  + Explicit blocks cannot nest, so they take it from the least-indented element (they are also the only block in which indentation is significant, and we want to allow people to indent the first line).
 + Certain blocks concatenate adjacent entries on the same indent.
 
 ## General formatting:
-+ Paragraphs are separated by blank lines; new lines are converted to spaces (but unnecessary between paragraphs and indent blocks).
++ Paragraphs are separated by blank lines; new lines are ignored (\newline if you need to force them--but in paragraph contexts you usually should not). Block contexts may change this behaviour.
 + Headings begin with a sequence of equal signs equal to the level of the header.
   + Headings within an indent block are local to that block.
 
-## Header
+## Line formatting
++ Quotation marks as \`'/\`\`'' (renders with smart quotes)
+  + \`\`{type}'' for specific class.
+  + \`' for explicit, unclassed, single quotes.
++ Explicit block as `%{type}content%` (type optional). Tilde escapes allowed, necessary for leading '{' and any '%'.
++ `*text*` for emphasis. Nesting is prohibited; use `\\em{\em{text}}` if necessary.
 
-A header is a set of key-value pairs begun and ended with three tildes.
+## Header
+A header is an optional set of key-value pairs begun and ended with three tildes. Headers must appear at the beginning of a document.
 + Key: `/^((?:[^:]|~:)+): */` (applying `~`-escaping).
 + Value: The value continues until the first line at root indentation.
   + Simple/list: Each element consists of one line; inline formatting allowed.
-  + Block: At least three quotation marks, closing with the next instance of three quotation marks or the next dedent. Block formatting allowed.
-  + Explicit: At least three backticks, closing with the next instance of the same number of backticks at the current indentation or the next dedent. No formatting processed.
+  + Block: Nothing but whitespace on the key's line; ends with the next dedent.
+  + Explicit: `%%%` on the key's line (any whitespace allowed); ends with the next dedent (using the explicit dedent rules). No formatting processed.
 
 ## Indent blocks
-+ \`\`\`: code block
-  + \`\`\`language other classes
+All internal blocks must start at the beginning of a line.
++ %%%: explicit block
+  + %%% language other attributes
+    + e.g. %%% haskell literate
   + code-language header field sets default
-  + \`\`\`{} for explicit plain text (overrides default)
+  + %%%{} for explicit plain text (overrides default)
 + $$$: display mathematics
   + First line can contain id and caption; numbered if id given.
 + >: blockquote
   + Further paragraphs are indented
-+ ~: citation
++ -: citation
   + Appends to blockquote; disregarded elsewhere
 + |, <|>, |>, <|: aligned blocks
   + Newlines produce line breaks.
@@ -46,3 +55,19 @@ A header is a set of key-value pairs begun and ended with three tildes.
 + +: unordered list (concatenates)
 + #: ordered list (concatenates)
   + simplified internal references.
++ ----- (or more): horizontal line. Ignores contents.
++ `/#+/`: header (with level).
+
+## Labels
++ `[id]:` creates a label.
+  + `[id]:` labels the parent block.
+  + `[^fnname]: fntext` for footnotes. The name is only significant internally.
+  + `[@id]: url` for links. Useful for keeping long links out of the text, or for reuse.
+  + Block labels must be the first non-whitespace after the block initializer.
++ `[id]{displayname}` references a label. The displayname is optional; many label types have sensible default displays.
+  + `[id]` will display section number, equation number, or figure number as appropriate, but the display name is honored if present.
+  + `[fnname]` will, unsurprisingly, display as a footnote. Any display name given is disregarded.
+
++ `<value>` creates an anonymous label--consider `<content>{display}` the equivalent of `[id]{display}` and a separate `[id]: content`.
+  + `<^fntext>` for quick footnotes.
+  + `<@address>{display}` for urls (if content is a valid url format).
