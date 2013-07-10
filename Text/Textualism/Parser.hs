@@ -47,6 +47,9 @@ warn w = modifyState (warnings %~ (w:))
 litspace :: Parser ()
 litspace = void $ char ' '
 
+litspaces :: Parser ()
+litspaces = void $ many1 (char ' ')
+
 eol :: Parser ()
 eol = void $ char '\n' <|> (char '\r' <* optional (char '\n'))
 
@@ -60,13 +63,29 @@ indentSame :: Parser ()
 indentSame = void $ getIndent >>= flip count litspace
 
 indentNew :: Parser ()
-indentNew = void $ many litspace >>= pushIndent . length
+indentNew = void $ do
+            l <- liftM length (many litspace)
+            i <- getIndent
+            if l > i then pushIndent i else fail "Indent expected"
 
 paragraphBreak :: Parser ()
 paragraphBreak = eol *> blankline *> indentSame
 
 notSpecial :: Parser Char
 notSpecial = undefined
+
+-- Block parsers
+litBlock :: Parser Block
+litBlock = BLit <$> header <*> (adjustIndents <$> indentedLines)
+  where header = (try $ string "%%%") *> litspaces *> names
+          where names = sepEndBy (pack <$> many1 (noneOf " \r\n")) litspaces
+                        <* eol
+        indentedLines = getIndent >>= \i ->
+          sepEndBy (try (count i litspace) *> line) eol
+          where line = pack <$> many (noneOf "\r\n")
+        adjustIndents [] = mempty
+        adjustIndents ls = T.unlines $ snd . T.splitAt minIndent <$> ls
+          where minIndent = L.minimum $ T.length . fst . T.span (==' ') <$> ls
 
 -- | Parse a line and push its indent onto the stack. Used for everything
 -- except explicit blocks, which may have an indented first line.

@@ -26,6 +26,7 @@ data HValue = VList [Span]
 
 data Block = Block
            | BSpan Span
+           | BLit [Text] Text
            deriving (Show)
 
 data Span = Span
