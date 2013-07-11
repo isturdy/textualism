@@ -43,9 +43,15 @@ popIndent = modifyState (indents %~ L.tail)
 warn :: Warning -> Parser ()
 warn w = modifyState (warnings %~ (w:))
 
+parse :: Parser a -> String -> Text -> Either ParseError a
+parse p = runParser p initialState
+
 -- Random parsec utilities
 litspace :: Parser ()
 litspace = void $ char ' '
+
+litspaces :: Parser ()
+litspaces = void $ many1 (char ' ')
 
 eol :: Parser ()
 eol = void $ char '\n' <|> (char '\r' <* optional (char '\n'))
@@ -60,7 +66,10 @@ indentSame :: Parser ()
 indentSame = void $ getIndent >>= flip count litspace
 
 indentNew :: Parser ()
-indentNew = void $ many litspace >>= pushIndent . length
+indentNew = void $ do
+            l <- liftM length (many litspace)
+            i <- getIndent
+            if l > i then pushIndent i else fail "Indent expected"
 
 paragraphBreak :: Parser ()
 paragraphBreak = eol *> blankline *> indentSame
@@ -68,10 +77,32 @@ paragraphBreak = eol *> blankline *> indentSame
 notSpecial :: Parser Char
 notSpecial = undefined
 
--- | Parse a line and push its indent onto the stack. Used for everything
--- except explicit blocks, which may have an indented first line.
-newIndentLine :: Parser Block
-newIndentLine = undefined
--- Pull the indents off a section of text.
---unindent :: Int -> Text -> Text
---unindent n = T.concat . fmap (T.take n) . T.lines
+idString :: Parser Text
+idString = pack <$> many1 (alphaNum <|> char '_' <|> char '\'')
+
+constChar :: Char -> a -> Parser a
+constChar c r = const r <$> char c
+
+ident :: Parser (Maybe Id)
+ident = optionMaybe . try $
+        char '[' *> typ <*> idString <* string "]:" <* litspaces
+  where typ = option BlockId (constChar '^' FootnoteId)
+
+blockId :: Parser (Maybe Id)
+blockId = ident >>= test
+  where test Nothing = return Nothing
+        test (Just b@(BlockId _)) = return (Just b)
+        test _ = fail "I expected a block id. What is this?"
+
+-- Block parsers
+litBlock :: Parser Block
+litBlock = uncurry BLit <$> header <*> (adjustIndents <$> indentedLines)
+  where header = (,) <$> ((try $ string "%%%") *> many litspace *> blockId)
+                     <*> names
+          where names = sepEndBy idString litspaces <* eol
+        indentedLines = getIndent >>= \i ->
+                          sepEndBy (try (count i litspace) *> line) eol
+          where line = pack <$> many (noneOf "\r\n")
+        adjustIndents [] = mempty
+        adjustIndents ls = T.unlines $ snd . T.splitAt minIndent <$> ls
+          where minIndent = L.minimum $ T.length . fst . T.span (==' ') <$> ls

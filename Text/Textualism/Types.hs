@@ -26,7 +26,22 @@ data HValue = VList [Span]
 
 data Block = Block
            | BSpan Span
+           | BLit {
+               label   :: Maybe Label
+             , classes :: [Text]
+             , content :: Text
+             }
            deriving (Show)
+
+data Label = Label {
+               lType :: LabelType
+             , lName :: Text
+             }
+             deriving (Eq, Show)
+
+data LabelType = BlockLabel
+               | FootnoteLabel
+               deriving (Eq, Show)
 
 data Span = Span
           deriving (Show)
