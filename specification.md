@@ -41,20 +41,18 @@ All internal blocks must start at the beginning of a line.
 + %%%: explicit block
   + %%% language other attributes
     + e.g. %%% haskell literate
-  + code-language header field sets default
-  + %%%{} for explicit plain text (overrides default)
+  + [future] code-language header field sets default
+    + %%%{} for explicit plain text (overrides default)
 + $$$: display mathematics
   + First line can contain id and caption; numbered if id given.
 + >: blockquote
   + Further paragraphs are indented
-+ -: citation
-  + Appends to blockquote; disregarded elsewhere
+  + Citation after optional label on introductory line.
 + |, <|>, |>, <|: aligned blocks
   + Newlines produce line breaks.
   + ragged on edges with angle brackets.
 + +: unordered list (concatenates)
 + #: ordered list (concatenates)
-  + simplified internal references.
 + ----- (or more): horizontal line. Ignores contents.
 + `/#+/`: header (with level).
 
@@ -66,7 +64,7 @@ All internal blocks must start at the beginning of a line.
   + Block labels must be the first non-whitespace after the block initializer.
 + `[id]{displayname}` references a label. The displayname is optional; many label types have sensible default displays.
   + `[id]` will display section number, equation number, or figure number as appropriate, but the display name is honored if present.
-  + `[fnname]` will, unsurprisingly, display as a footnote. Any display name given is disregarded.
+  + `[^fnname]` will, unsurprisingly, display as a footnote. Any display name given is disregarded.
 
 + `<value>` creates an anonymous label--consider `<content>{display}` the equivalent of `[id]{display}` and a separate `[id]: content`.
   + `<^fntext>` for quick footnotes.
