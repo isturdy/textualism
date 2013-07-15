@@ -1,5 +1,6 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections   #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TupleSections     #-}
 
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 
@@ -10,10 +11,13 @@ import           Control.Lens
 import           Control.Monad
 import           Data.Char
 import qualified Data.List             as L
+import           Data.Maybe
 import           Data.Monoid
-import           Data.Text             hiding (count, length)
+import           Data.Text             hiding (count, length, span)
 import qualified Data.Text             as T
-import           Text.Parsec           hiding (many, optional, space, (<|>))
+import           Prelude               hiding (span)
+import           Text.Parsec           hiding (many, optional, parse, space,
+                                        spaces, (<|>))
 import           Text.Parsec.Text      ()
 
 import           Text.Textualism.Types
@@ -55,19 +59,22 @@ litspaces :: Parser ()
 litspaces = void $ many1 (char ' ')
 
 space :: Parser ()
-space = satisfy test
+space = void $ satisfy test
   where test '\n' = False
         test '\r' = False
         test c    = isSpace c
 
 spaces :: Parser ()
-spaces = many space
+spaces = void $ many space
 
 eol :: Parser ()
 eol = void $ char '\n' <|> (char '\r' <* optional (char '\n'))
 
+optionEol :: Parser ()
+optionEol = option () eol
+
 blankline :: Parser ()
-blankline = try $ many space *> eol
+blankline = try $ many space *> lookAhead eol
 
 indent :: Parser Int
 indent = lookAhead (length <$> many litspace)
@@ -76,10 +83,10 @@ indentSame :: Parser ()
 indentSame = void . try $ getIndent >>= flip count litspace
 
 indentNew :: Parser ()
-indentNew = void $ do
+indentNew = void . try $ do
             i <- getIndent
-            l <- liftM length (try $ many litspace)
-            if l > i then pushIndent i else fail "Indent expected"
+            l <- length <$> many1 litspace
+            if l > i then pushIndent l else fail "Indent Expected"
 
 paragraphBreak :: Parser ()
 paragraphBreak = eol *> blankline *> indentSame
@@ -91,73 +98,83 @@ idString :: Parser Text
 idString = pack <$> many1 (alphaNum <|> char '_' <|> char '\'')
 
 pConstChar :: Char -> r -> Parser r
-pConstChar c r = const r <$> c
+pConstChar c r = const r <$> char c
 
-pBlockSym :: Text -> Parser ()
+pBlockSym :: String -> Parser ()
 pBlockSym t = void $ (try $ string t) *> many space
 
-pLabel :: Parser (Maybe Label)
-pLabel = optionMaybe . try $
-        char '[' *> typ <*> idString <* string "]:" <* litspaces
-  where typ = option BlockId (pConst '^' FootnoteId)
+pLabel :: LabelType -> Parser (Maybe Label)
+pLabel lt = optionMaybe . try $ Label <$>
+        (char '[' *> typ) <*> (idString <* string "]:" <* spaces)
+  where typ = option BlockLabel (pConstChar '^' FootnoteLabel)
+        check l | l == lt = l
+        check _ = error $ "Bad label; expecting " ++ (show lt)
 
-blockId :: Parser (Maybe Id)
-blockId = ident >>= test
-  where test Nothing = return Nothing
-        test (Just b@(BlockId _)) = return (Just b)
-        test _ = fail "I expected a block id. What is this?"
-
--- Note lack of 'try'; absolutely no other parser may use '~'
-pEscaped :: Parser Char
-pEscaped = char '~' *> anyChar
+pBlockLabel :: Parser (Maybe Label)
+pBlockLabel = pLabel BlockLabel
 
 -- Block parsers
 
 -- Parse a sequence of blocks at the present indentation
 pBlock :: Parser Block
-pBlock = Blocks <$> sepBy block indentSame
-  where block = pBlockLit <|> pBlockList
+pBlock = blocks <$> sepBy block indentSame
+  where block = pBlockLit <|> pBlockQuote
 
 -- Parse a sequence of blocks at a new (higher) indentation, and remove the
 -- indent.
 pNewBlock :: Parser Block
 pNewBlock = indentNew *> pBlock <* popIndent
 
+pNewLines :: Parser [Span]
+pNewLines = (:) <$> (indentNew *> pSpan <* optional eol)
+                <*> sepEndBy ((indentSame *> pSpan)
+                              <|> (const NewLine <$> blankline))
+                             eol
+                <*  popIndent
+
 -- Literal block. Note the non-standard indentation
 -- (to allow for first-line indents)
 pBlockLit :: Parser Block
-pBlockLit = BLit <$> (pBlockSym "%%%" *> blockId)
+pBlockLit = BLit <$> (pBlockSym "%%%" *> pBlockLabel)
                  <*> (sepEndBy idString litspaces <* eol)
                  <*> (adjustIndents <$> indentedLines)
-  where indentedLines = getIndent >>= \i -> sepEndBy (line i <|> blankline) eol
-          where line i = pack <$> try (count i litspace) *> many (noneOf "\r\n")
+  where indentedLines = (+1) <$> getIndent >>= \i ->
+          sepEndBy (line i <|> const mempty <$> blankline) eol
+          where line i = pack <$> ((try $ count i litspace)
+                                   *> many (noneOf "\r\n"))
         adjustIndents [] = mempty
         adjustIndents ls = T.unlines $ T.drop minIndent <$> ls
-          where minIndent = L.minimum $ T.findIndex (/=' ') <$> ls
+          where minIndent = L.minimum $ fromMaybe maxBound
+                                      . T.findIndex (/=' ') <$> ls
 
 pBlockQuote :: Parser Block
-pBlockQuote = BQuote <$> (pBlockSym ">" *> blockId) <*> pSpan <*> pBlocks
-
-pCitation :: Parser Citation
-pCitation = Citation <$> pBlockSym "-" *> pSpan
+pBlockQuote = BQuote <$> (pBlockSym ">" *> pBlockLabel) <*> pSpan <*> pBlock
 
 pBlockPar :: Parser Block
-pBlockPar = BPar <$> (many space *> pBlockLabel) <*> sepEndBy pSpan spaces
+pBlockPar = BPar <$> (many space *> pBlockLabel) <*> pSpan
 
--- This is horrifically wrong, in ways that only a typechecker can fully
--- understand. (move constructor to first line, parse alignment correctly).
+-- Aligned block. Single newlines are significant.
 pAligned :: Parser Block
-pAligned a = alignment >>= \a -> sepBy (aligned a) (eol *> indentSame)
-  where aligned a = BAligned <$> a <*> pBlockLabel <*> pSpan <* eol
-        alignment = lookAhead $ (const (pBlockSym "|>") <$> (string "|>"))
-                    <|> (string "<|" *> option (pBlockSy "<|")
-                         (const (pBlockSym "<|>") <$> char '>'))
+pAligned = BAligned <$> (alignment <* spaces)
+                    <*> (pBlockLabel <* eol)
+                    <*> pNewLines
+  where alignment = (try (string "|>") *> option AlignLeft
+                     (const CenteredLeft <$> char '|'))
+                <|> (try (string "<|") *> option AlignRight
+                     (const Centered <$> char '>'))
 
 pHeader :: Parser Block
-pHeader = BHeader <$> (length <$> many1 (char '#') *> spaces)
+pHeader = BHeader <$> (length <$> many1 (char '#') <* spaces)
                   <*> pBlockLabel <*> pSpan
+
+pLine :: Parser Block
+pLine = const BLine <$> (try (string "-----") *> many (noneOf "\r\n") *> eol)
 
 -- Span parsers
 pSpan :: Parser Span
-pSpan = Spans <$> span
-  where span = undefined
+pSpan = S <$> span
+  where span = many (noneOf "\r\n")
+
+-- Note lack of 'try'; absolutely no other parser may use '~'
+pEscaped :: Parser Char
+pEscaped = char '~' *> anyChar

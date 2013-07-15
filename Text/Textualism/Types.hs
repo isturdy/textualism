@@ -27,30 +27,35 @@ data HValue = VList [Span]
 data Block = Blocks [Block]
            | BSpan Span
            | BHeader {
-               label   :: Maybe Label
-             , level   :: Int
-             , content :: Span
+               level    :: Int
+             , label    :: Maybe Label
+             , contentS :: Span
              }
            | BLit {
-               label   :: Maybe Label
-             , classes :: [Text] -- May be empty
-             , content :: Text
+               label    :: Maybe Label
+             , classes  :: [Text] -- May be empty
+             , contentT :: Text
              }
            | BQuote {
                label    :: Maybe Label
-             , content  :: Block
              , citation :: Span
+             , contentB :: Block
              }
            | BPar {
-               label   :: Maybe Label
-             , content :: Span
+               label    :: Maybe Label
+             , contentS :: Span
              }
            | BAligned {
                alignment :: Alignment
              , label     :: Maybe Label
              , lines     :: [Span] -- Must never be empty
              }
+           | BLine
            deriving (Show)
+
+blocks :: [Block] -> Block
+blocks [a] = a
+blocks l   = Blocks l
 
 data Label = Label {
                lType :: LabelType
@@ -63,22 +68,12 @@ data LabelType = BlockLabel
                deriving (Eq, Show)
 
 data Alignment = Centered
+               | CenteredLeft
                | AlignLeft
                | AlignRight
-
--- These use strings because that is what even a text parser returns
-toAlignment :: String -> Alignment
-toAlignment "<|>" = Centered
-toAlignment "|>"  = AlignLeft
-toAlignment "<|"  = AlignRight
-toAlignment _ = error "Text.Textualism.Types.toAlignment: Invalid alignment."
-
-fromAlignment :: Alignment -> String
-fromAlignment Centered   = "<|>"
-fromAlignment AlignLeft  = "|>"
-fromAlignment AlignRight = "<|"
-
-data Citation = [Span]
+                 deriving (Eq, Show)
 
 data Span = Spans [Span]
+          | NewLine
+          | S String
           deriving (Show)
