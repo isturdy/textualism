@@ -24,12 +24,10 @@ data HValue = VList [Span]
             | VExplicit Text
               deriving (Show)
 
-data Block = Blocks [Block]
-           | BSpan Span
-           | BHeader {
+data Block = BHeader {
                level    :: Int
              , label    :: Maybe Label
-             , contentS :: Span
+             , contentS :: [Span]
              }
            | BLit {
                label    :: Maybe Label
@@ -38,24 +36,29 @@ data Block = Blocks [Block]
              }
            | BQuote {
                label    :: Maybe Label
-             , citation :: Span
-             , contentB :: Block
+             , citation :: [Span]
+             , contentB :: [Block]
              }
            | BPar {
                label    :: Maybe Label
-             , contentS :: Span
+             , contentS :: [Span]
              }
            | BAligned {
                alignment :: Alignment
              , label     :: Maybe Label
-             , lines     :: [Span] -- Must never be empty
+             , lines     :: [SLine] -- Must never be empty
              }
-           | BLine
+           | BMath {
+               label    :: Maybe Label
+             , contentT :: Text
+             }
+           | BMacro {
+               bMacro     :: Text
+             , bArguments :: [Text]
+             , contentT   :: Text
+             }
+           | BHLine
            deriving (Show)
-
-blocks :: [Block] -> Block
-blocks [a] = a
-blocks l   = Blocks l
 
 data Label = Label {
                lType :: LabelType
@@ -71,9 +74,17 @@ data Alignment = Centered
                | CenteredLeft
                | AlignLeft
                | AlignRight
-                 deriving (Eq, Show)
+               deriving (Eq, Show)
 
-data Span = Spans [Span]
-          | NewLine
-          | S String
+data Span = SQuote Text [Span]
+          | SLit [Text] Text
+          | SEm
+          | SMacro Text [Text]
+          | SLabel LabelType Text
+          | SText Text
+          | SMath Text
           deriving (Show)
+
+data SLine = Spans [Span]
+           | NewLine
+           deriving (Show)

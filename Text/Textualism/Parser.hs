@@ -91,24 +91,23 @@ indentNew = void . try $ do
 paragraphBreak :: Parser ()
 paragraphBreak = eol *> blankline *> indentSame
 
-notSpecial :: Parser Char
-notSpecial = undefined
+pIdString :: Parser Text
+pIdString = pack <$> many1 (alphaNum <|> char '_' <|> char '\'')
 
-idString :: Parser Text
-idString = pack <$> many1 (alphaNum <|> char '_' <|> char '\'')
-
-pConstChar :: Char -> r -> Parser r
-pConstChar c r = const r <$> char c
+pIdStrings :: Parser [Text]
+pIdStrings = sepEndBy pIdString litspaces
 
 pBlockSym :: String -> Parser ()
 pBlockSym t = void $ (try $ string t) *> many space
 
 pLabel :: LabelType -> Parser (Maybe Label)
-pLabel lt = optionMaybe . try $ Label <$>
-        (char '[' *> typ) <*> (idString <* string "]:" <* spaces)
-  where typ = option BlockLabel (pConstChar '^' FootnoteLabel)
-        check l | l == lt = l
-        check _ = error $ "Bad label; expecting " ++ (show lt)
+pLabel lt = (optionMaybe . try $ Label <$>
+             (char '[' *> typ) <*> (pIdString <* string "]:" <* spaces))
+            >>= check
+  where typ = option BlockLabel (FootnoteLabel <$ char '^')
+        check Nothing = return Nothing
+        check (Just l) = if lType l == lt then return (Just l)
+                         else fail $ "Bad label; expecting " ++ (show lt)
 
 pBlockLabel :: Parser (Maybe Label)
 pBlockLabel = pLabel BlockLabel
@@ -116,19 +115,19 @@ pBlockLabel = pLabel BlockLabel
 -- Block parsers
 
 -- Parse a sequence of blocks at the present indentation
-pBlock :: Parser Block
-pBlock = blocks <$> sepBy block indentSame
+pBlock :: Parser [Block]
+pBlock = sepBy block indentSame
   where block = pBlockLit <|> pBlockQuote
 
 -- Parse a sequence of blocks at a new (higher) indentation, and remove the
 -- indent.
-pNewBlock :: Parser Block
+pNewBlock :: Parser [Block]
 pNewBlock = indentNew *> pBlock <* popIndent
 
-pNewLines :: Parser [Span]
-pNewLines = (:) <$> (indentNew *> pSpan <* optional eol)
-                <*> sepEndBy ((indentSame *> pSpan)
-                              <|> (const NewLine <$> blankline))
+pNewLines :: Parser [SLine]
+pNewLines = (:) <$> (indentNew *> (Spans <$> pSpan) <* optional eol)
+                <*> sepEndBy (Spans <$> (indentSame *> pSpan)
+                              <|> (NewLine <$ blankline))
                              eol
                 <*  popIndent
 
@@ -136,13 +135,15 @@ pNewLines = (:) <$> (indentNew *> pSpan <* optional eol)
 -- (to allow for first-line indents)
 pBlockLit :: Parser Block
 pBlockLit = BLit <$> (pBlockSym "%%%" *> pBlockLabel)
-                 <*> (sepEndBy idString litspaces <* eol)
-                 <*> (adjustIndents <$> indentedLines)
-  where indentedLines = (+1) <$> getIndent >>= \i ->
-          sepEndBy (line i <|> const mempty <$> blankline) eol
-          where line i = pack <$> ((try $ count i litspace)
-                                   *> many (noneOf "\r\n"))
-        adjustIndents [] = mempty
+                 <*> (pIdStrings <* eol)
+                 <*> (pIndentedLines)
+
+pIndentedLines :: Parser Text
+pIndentedLines = (+1) <$> getIndent >>= \i ->
+  adjustIndents <$> sepEndBy (line i <|> (mempty <$ blankline)) eol
+  where line i = pack <$> ((try $ count i litspace)
+                           *> many (noneOf "\r\n"))
+        adjustIndents [] = ""
         adjustIndents ls = T.unlines $ T.drop minIndent <$> ls
           where minIndent = L.minimum $ fromMaybe maxBound
                                       . T.findIndex (/=' ') <$> ls
@@ -155,26 +156,45 @@ pBlockPar = BPar <$> (many space *> pBlockLabel) <*> pSpan
 
 -- Aligned block. Single newlines are significant.
 pAligned :: Parser Block
-pAligned = BAligned <$> (alignment <* spaces)
+pAligned = BAligned <$> (pAlignment <* spaces)
                     <*> (pBlockLabel <* eol)
                     <*> pNewLines
-  where alignment = (try (string "|>") *> option AlignLeft
-                     (const CenteredLeft <$> char '|'))
+  where pAlignment = (try (string "|>") *> option AlignLeft
+                     (CenteredLeft <$ char '|'))
                 <|> (try (string "<|") *> option AlignRight
-                     (const Centered <$> char '>'))
+                     (Centered <$ char '>'))
 
 pHeader :: Parser Block
 pHeader = BHeader <$> (length <$> many1 (char '#') <* spaces)
                   <*> pBlockLabel <*> pSpan
 
 pLine :: Parser Block
-pLine = const BLine <$> (try (string "-----") *> many (noneOf "\r\n") *> eol)
+pLine = BHLine <$ (try (string "-----") *> many (noneOf "\r\n") *> eol)
+
+pBlockMath :: Parser Block
+pBlockMath = BMath <$> (pBlockSym "$$$" *> pBlockLabel) <*> pIndentedLines
 
 -- Span parsers
-pSpan :: Parser Span
-pSpan = S <$> span
-  where span = many (noneOf "\r\n")
+pSpan :: Parser [Span]
+pSpan = many span
+  where span = pText <|> pQuote <|> pLit <|> pMath
 
--- Note lack of 'try'; absolutely no other parser may use '~'
-pEscaped :: Parser Char
-pEscaped = char '~' *> anyChar
+pText :: Parser Span
+pText = SText . pack <$> many1 (escaped <|> notSpecial
+                            <|> (try (char '\'' <* notFollowedBy (char '\''))))
+  where notSpecial = noneOf "`'%\r\n"
+        escaped = (char '~' *> anyChar)
+
+pQuote :: Parser Span
+pQuote = SQuote <$> (try (string "``")
+                     *> option mempty (char '{' *> pIdString <* char '}'))
+                <*> (pSpan <* string "''")
+
+pLit :: Parser Span
+pLit = SLit <$> (char '`' *> option [] (char '{' *> pIdStrings <* char '}'))
+            <*> (pLitText <* char '`')
+  where pLitText = pack <$> many (try ('`' <$ string "``")
+                              <|> noneOf "`\r\n")
+
+pMath :: Parser Span
+pMath = SMath . pack <$> (char '$' *> many (noneOf "$\r\n") <* char '$')
