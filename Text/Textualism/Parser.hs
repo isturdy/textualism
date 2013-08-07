@@ -2,38 +2,39 @@
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TupleSections     #-}
 
-{-# OPTIONS_GHC -fno-warn-unused-imports #-}
-
 module Text.Textualism.Parser where
 
 import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 import           Data.Char
-import qualified Data.List             as L
+import qualified Data.List                 as L
+import qualified Data.Map                  as M
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Text             hiding (count, length, span)
-import qualified Data.Text             as T
-import           Prelude               hiding (span)
-import           Text.Parsec           hiding (many, optional, parse, space,
-                                        spaces, (<|>))
-import           Text.Parsec.Text      ()
+import           Data.Text                 hiding (count, filter, length, span)
+import qualified Data.Text                 as T
+import           Prelude                   hiding (span)
+import           Text.Parsec               hiding (many, optional, parse, space,
+                                            spaces, (<|>))
+import           Text.Parsec.Text          ()
 
+import           Text.Textualism.Normalize
 import           Text.Textualism.Types
+import           Text.Textualism.Util
 
 type Parser = Parsec Text ParserState
 
 newtype Warning = Warning Text
 
 data ParserState = ParserState {
-    _indents  :: [Int]
-  , _warnings :: [Warning] -- In reverse order for efficiency.
+    _indents :: [Int]
+  , _refs    :: Refs
   }
 makeLenses ''ParserState
 
 initialState :: ParserState
-initialState = ParserState [0] []
+initialState = ParserState [] (Refs mempty mempty)
 
 getIndent :: Parser Int
 getIndent = liftM (L.head . (^.indents)) getState
@@ -45,11 +46,18 @@ pushIndent n = modifyState (indents %~ (n:))
 popIndent :: Parser ()
 popIndent = modifyState (indents %~ L.tail)
 
-warn :: Warning -> Parser ()
-warn w = modifyState (warnings %~ (w:))
+addFn :: Text -> [RBlock] -> Parser ()
+addFn fnid fntxt = modifyState (refs.footnoteMap %~ M.insert fnid fntxt)
+
+addLink :: Text -> Text -> Parser ()
+addLink lid link = modifyState (refs.linkMap %~ M.insert lid link)
 
 parse :: Parser a -> String -> Text -> Either ParseError a
 parse p = runParser p initialState
+
+parseDocument :: String -> Text -> Either Text Document
+parseDocument source t =
+  mapLeft (pack . show) (parse pDocument source t) >>= normalize
 
 -- Random parsec utilities
 litspace :: Parser ()
@@ -74,7 +82,7 @@ optionEol :: Parser ()
 optionEol = option () eol
 
 blankline :: Parser ()
-blankline = try $ many space *> lookAhead eol
+blankline = try $ many space *> eol
 
 indent :: Parser Int
 indent = lookAhead (length <$> many litspace)
@@ -98,103 +106,124 @@ pIdStrings :: Parser [Text]
 pIdStrings = sepEndBy pIdString litspaces
 
 pBlockSym :: String -> Parser ()
-pBlockSym t = void $ (try $ string t) *> many space
+pBlockSym t = void $ try (string t) *> many space
 
 pLabel :: LabelType -> Parser (Maybe Label)
 pLabel lt = (optionMaybe . try $ Label <$>
              (char '[' *> typ) <*> (pIdString <* string "]:" <* spaces))
             >>= check
   where typ = option BlockLabel (FootnoteLabel <$ char '^')
-        check Nothing = return Nothing
-        check (Just l) = if lType l == lt then return (Just l)
-                         else fail $ "Bad label; expecting " ++ (show lt)
+        check Nothing = pure Nothing
+        check (Just l) = if lType l == lt then pure (Just l)
+                         else fail $ "Bad label; expecting " ++ show lt
 
 pBlockLabel :: Parser (Maybe Label)
 pBlockLabel = pLabel BlockLabel
 
 -- Block parsers
 
--- Parse a sequence of blocks at the present indentation
-pBlock :: Parser [Block]
-pBlock = sepBy block indentSame
-  where block = pBlockLit <|> pBlockQuote
+pDocument :: Parser RDocument
+pDocument = undefined
 
+-- Parse a sequence of blocks at the present indentation
+pBlock :: Parser [RBlock]
+pBlock = filter notNil <$> sepBy block indentSame
+  where block = pBlockPar <|> pBlockQuote <|> pBlockLit <|> pHeader <|> pAligned
+            <|> pLine <|> pBlockMath <|> pBlockRef
 -- Parse a sequence of blocks at a new (higher) indentation, and remove the
 -- indent.
-pNewBlock :: Parser [Block]
+pNewBlock :: Parser [RBlock]
 pNewBlock = indentNew *> pBlock <* popIndent
 
-pNewLines :: Parser [SLine]
-pNewLines = (:) <$> (indentNew *> (Spans <$> pSpan) <* optional eol)
-                <*> sepEndBy (Spans <$> (indentSame *> pSpan)
-                              <|> (NewLine <$ blankline))
+pNewLines :: Parser [RSLine]
+pNewLines = (:) <$> (indentNew *> (RSpans <$> pSpan) <* optional eol)
+                <*> sepEndBy (RSpans <$> (indentSame *> pSpan)
+                              <|> (RNewLine <$ blankline))
                              eol
                 <*  popIndent
-
--- Literal block. Note the non-standard indentation
--- (to allow for first-line indents)
-pBlockLit :: Parser Block
-pBlockLit = BLit <$> (pBlockSym "%%%" *> pBlockLabel)
-                 <*> (pIdStrings <* eol)
-                 <*> (pIndentedLines)
 
 pIndentedLines :: Parser Text
 pIndentedLines = (+1) <$> getIndent >>= \i ->
   adjustIndents <$> sepEndBy (line i <|> (mempty <$ blankline)) eol
-  where line i = pack <$> ((try $ count i litspace)
+  where line i = pack <$> (try (count i litspace)
                            *> many (noneOf "\r\n"))
         adjustIndents [] = ""
         adjustIndents ls = T.unlines $ T.drop minIndent <$> ls
           where minIndent = L.minimum $ fromMaybe maxBound
                                       . T.findIndex (/=' ') <$> ls
 
-pBlockQuote :: Parser Block
-pBlockQuote = BQuote <$> (pBlockSym ">" *> pBlockLabel) <*> pSpan <*> pBlock
+-- Literal block. Note the non-standard indentation
+-- (to allow for first-line indents)
+pBlockLit :: Parser RBlock
+pBlockLit = RBLit <$> (pBlockSym "```" *> pBlockLabel)
+                  <*> (pIdStrings <* eol)
+                  <*> pIndentedLines
 
-pBlockPar :: Parser Block
-pBlockPar = BPar <$> (many space *> pBlockLabel) <*> pSpan
+pBlockQuote :: Parser RBlock
+pBlockQuote = RBQuote <$> (pBlockSym ">" *> pBlockLabel) <*> pSpan <*> pBlock
+
+pBlockPar :: Parser RBlock
+pBlockPar = RBPar <$> (many space *> pBlockLabel) <*> pSpan
 
 -- Aligned block. Single newlines are significant.
-pAligned :: Parser Block
-pAligned = BAligned <$> (pAlignment <* spaces)
-                    <*> (pBlockLabel <* eol)
-                    <*> pNewLines
+pAligned :: Parser RBlock
+pAligned = RBAligned <$> (pAlignment <* spaces)
+                     <*> (pBlockLabel <* eol)
+                     <*> pNewLines
   where pAlignment = (try (string "|>") *> option AlignLeft
                      (CenteredLeft <$ char '|'))
                 <|> (try (string "<|") *> option AlignRight
                      (Centered <$ char '>'))
 
-pHeader :: Parser Block
-pHeader = BHeader <$> (length <$> many1 (char '#') <* spaces)
-                  <*> pBlockLabel <*> pSpan
+pHeader :: Parser RBlock
+pHeader = RBHeader <$> (length <$> many1 (char '#') <* spaces)
+                   <*> pBlockLabel <*> pSpan
 
-pLine :: Parser Block
-pLine = BHLine <$ (try (string "-----") *> many (noneOf "\r\n") *> eol)
+pLine :: Parser RBlock
+pLine = RBHLine <$ (try (string "-----") *> many (noneOf "\r\n") *> eol)
 
-pBlockMath :: Parser Block
-pBlockMath = BMath <$> (pBlockSym "$$$" *> pBlockLabel) <*> pIndentedLines
+pBlockMath :: Parser RBlock
+pBlockMath = RBMath <$> (pBlockSym "$$$" *> pBlockLabel) <*> pIndentedLines
+
+pBlockRef :: Parser RBlock
+pBlockRef = RBNil <$ (join . try $ char '[' *>
+            (((addFn   <$ char '^') <*> (pIdString <* string "]:\n")
+                                    <*> pNewBlock)
+         <|> ((addLink <$ char '@') <*> (pIdString <* string "]:" <* litspaces)
+                                    <*> (pack <$> (many1 $ noneOf "\r\n"))
+                                    <*  char '\n')))
 
 -- Span parsers
-pSpan :: Parser [Span]
-pSpan = many span
-  where span = pText <|> pQuote <|> pLit <|> pMath
+pSpan :: Parser [RSpan]
+pSpan = pSpanS ""
 
-pText :: Parser Span
-pText = SText . pack <$> many1 (escaped <|> notSpecial
-                            <|> (try (char '\'' <* notFollowedBy (char '\''))))
-  where notSpecial = noneOf "`'%\r\n"
-        escaped = (char '~' *> anyChar)
+pSpanS :: String -> Parser [RSpan]
+pSpanS s = many (pText s <|> pQuote <|> pEm <|> pLit <|> pMath)
 
-pQuote :: Parser Span
-pQuote = SQuote <$> (try (string "``")
+pText :: String -> Parser RSpan
+pText s =
+  RSText . pack <$> many1 (escaped <|> notSpecial)
+  where notSpecial = noneOf (s <> "`'<\r\n")
+        escaped = char '~' *> anyChar
+
+pQuote :: Parser RSpan
+pQuote = RSQuote <$> (try (string "``")
                      *> option mempty (char '{' *> pIdString <* char '}'))
                 <*> (pSpan <* string "''")
 
-pLit :: Parser Span
-pLit = SLit <$> (char '`' *> option [] (char '{' *> pIdStrings <* char '}'))
+pLit :: Parser RSpan
+pLit = RSLit <$> (char '`' *> option [] (char '{' *> pIdStrings <* char '}'))
             <*> (pLitText <* char '`')
   where pLitText = pack <$> many (try ('`' <$ string "``")
                               <|> noneOf "`\r\n")
 
-pMath :: Parser Span
-pMath = SMath . pack <$> (char '$' *> many (noneOf "$\r\n") <* char '$')
+pMath :: Parser RSpan
+pMath = char '$' *> option Inline (Display <$ char '$') >>= \mtype ->
+  RSMath mtype <$> (pack <$> many (noneOf "$\r\n"))
+               <*  if mtype == Inline then char '$' else char '$' >> char '$'
+
+pEm :: Parser RSpan
+pEm = char '*' *> (RSEm <$> pSpanS "*") <* char '*'
+
+pRef :: Parser RSpan
+pRef = undefined
