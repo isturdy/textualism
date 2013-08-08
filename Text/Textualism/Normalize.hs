@@ -16,7 +16,6 @@ import           Data.Monoid
 import           Data.Text
 
 import           Text.Textualism.Types
-import Text.Textualism.Util
 
 data NormState = NormState {
                    _fns   :: [Footnote]
@@ -49,20 +48,16 @@ normBlock fnp b =
       {-# INLINE normS #-}
       normB = traverse (normBlock fnp)
       {-# INLINE normB #-}
-      normLine _    RNewLine   = pure NewLine
-      normLine fnp' (RSpans ss) = Spans <$> traverse (normSpan fnp') ss
-      {-# INLINE normLine #-}
   in case b of
-    RBHeader lvl l ss  -> BHeader lvl l <$> hdNum lvl <*> normS ss
-    RBLit l cs c     -> pure $ BLit l cs c
-    RBQuote l c bs   -> BQuote l <$> normS c <*> normB bs
-    RBPar l ss       -> BPar l <$> normS ss
-    RBAligned a l ls -> BAligned a l <$> traverse (normLine fnp) ls
-    RBMath l ct      -> pure $ BMath l ct
-    RBMacro nm args  -> pure $ BMacro nm args
-    RBHLine          -> pure BHLine
-    RBNil            -> error "Bug at Text.Textualism.Normalize.normBlock: \
-                              \RBNil escaped parser."
+    RBHeader lvl l ss -> BHeader lvl l <$> hdNum lvl <*> normS ss
+    RBLit l cs c      -> pure $ BLit l cs c
+    RBQuote l c bs    -> BQuote l <$> normS c <*> normB bs
+    RBPar l ss        -> BPar l <$> normS ss
+    RBAligned a l ls  -> BAligned a l <$> traverse normS ls
+    RBMath l ct       -> pure $ BMath l ct
+    RBHLine           -> pure BHLine
+    RBNil             -> error "Bug at Text.Textualism.Normalize.normBlock: \
+                               \RBNil escaped parser."
 
 normSpan :: Bool -> RSpan -> Norm Span
 normSpan fnp s =
@@ -74,7 +69,6 @@ normSpan fnp s =
     RSEm ss      -> SEm <$> norm ss
     RSText t     -> pure $ SText t
     RSMath tp t  -> pure $ SMath tp t
-    RSMacro nm args -> pure $ SMacro nm args
     RSRef FootnoteLabel fnid ->
       if fnp
       then M.lookup fnid <$> use (refs.footnoteMap) >>= \case

@@ -5,12 +5,7 @@ module Text.Textualism.Types where
 
 import           Control.Lens
 import           Data.Map     (Map)
-import qualified Data.Map     as M
 import           Data.Text    hiding (foldl')
-
--- | Lookup a value in a document's header.
-lookupValue :: Text -> RDocument -> Maybe RHValue
-lookupValue k (RDocument h _ _) = M.lookup k h
 
 -- Global types
 
@@ -39,35 +34,31 @@ data RHValue = RVList [RSpan]
 
 data RBlock = RBHeader {
                 rLevel    :: Int
-              , rLabel    :: Maybe Label
+              , rLabel    :: Maybe Text
               , rContentS :: [RSpan]
               }
             | RBLit {
-                rLabel    :: Maybe Label
+                rLabel    :: Maybe Text
               , rClasses  :: [Text] -- May be empty
               , rContentT :: Text
               }
             | RBQuote {
-                rLabel    :: Maybe Label
+                rLabel    :: Maybe Text
               , rCitation :: [RSpan]
               , rContentB :: [RBlock]
               }
             | RBPar {
-                rLabel    :: Maybe Label
+                rLabel    :: Maybe Text
               , rContentS :: [RSpan]
               }
             | RBAligned {
                 rAlignment :: Alignment
-              , rLabel     :: Maybe Label
-              , rLines     :: [RSLine] -- Must never be empty
+              , rLabel     :: Maybe Text
+              , rLines     :: [[RSpan]] -- Outer level must never be empty
               }
             | RBMath {
-                rLabel    :: Maybe Label
+                rLabel    :: Maybe Text
               , rContentT :: Text
-              }
-            | RBMacro {
-                rBMacro     :: Text
-              , rBArguments :: [Text]
               }
             | RBHLine
             | RBNil
@@ -82,20 +73,15 @@ data Label = Label {
              , lName :: Text
              } deriving (Eq, Show)
 
-data RSpan = RSQuote Text [RSpan]
+data RSpan = RSQuote (Maybe Text) [RSpan]
            | RSLit [Text] Text
            | RSEm [RSpan]
-           | RSMacro Text [Text]
            | RSText Text
            | RSMath MathType Text
            | RSRef LabelType Text
            | RIFn  [RSpan]
            | RILink LabelType Text
            deriving (Show)
-
-data RSLine = RSpans [RSpan]
-            | RNewLine
-            deriving (Show)
 
 data RDocument = RDocument Header [RBlock] Refs
                deriving (Show)
@@ -108,57 +94,48 @@ makeLenses ''Refs
 
 -- The normalized document tree--substitution, numbering, etc.
 
-data Block = BHeader {
+data Block = BPar {
+               label    :: Maybe Text
+             , contentS :: [Span]
+             }
+           | BHeader {
                level    :: Int
-             , label    :: Maybe Label
+             , label    :: Maybe Text
              , number   :: Int
              , contentS :: [Span]
              }
-           | BLit {
-               label    :: Maybe Label
-             , classes  :: [Text] -- May be empty
-             , contentT :: Text
-             }
            | BQuote {
-               label    :: Maybe Label
+               label    :: Maybe Text
              , citation :: [Span]
              , contentB :: [Block]
              }
-           | BPar {
-               label    :: Maybe Label
-             , contentS :: [Span]
+           | BLit {
+               label    :: Maybe Text
+             , classes  :: [Text] -- May be empty
+             , contentT :: Text
+             }
+           | BMath {
+               label    :: Maybe Text
+             , contentT :: Text
              }
            | BAligned {
                alignment :: Alignment
-             , label     :: Maybe Label
-             , lines     :: [SLine] -- Must never be empty
-              }
-           | BMath {
-               label    :: Maybe Label
-             , contentT :: Text
-             }
-           | BMacro {
-               bMacro     :: Text
-             , bArguments :: [Text]
+             , label     :: Maybe Text
+             , lines     :: [[Span]] -- Outer level must never be empty
              }
            | BHLine
            deriving (Show)
 
-data Span = SFn Int
-          | SQuote Text [Span]
-          | SLit [Text] Text
+data Span = SText Text
           | SEm [Span]
-          | SText Text
+          | SQuote (Maybe Text) [Span]
+          | SLit [Text] Text
+          | SFn Int
           | SMath MathType Text
-          | SMacro Text [Text]
           deriving (Show)
 
 data Footnote = Footnote Int [Block]
               deriving (Show)
-
-data SLine = Spans [Span]
-           | NewLine
-           deriving (Show)
 
 data Document = Document {
                   _header    :: Header

@@ -108,16 +108,13 @@ pIdStrings = sepEndBy pIdString litspaces
 pBlockSym :: String -> Parser ()
 pBlockSym t = void $ try (string t) *> many space
 
-pLabel :: LabelType -> Parser (Maybe Label)
-pLabel lt = (optionMaybe . try $ Label <$>
-             (char '[' *> typ) <*> (pIdString <* string "]:" <* spaces))
-            >>= check
-  where typ = option BlockLabel (FootnoteLabel <$ char '^')
-        check Nothing = pure Nothing
-        check (Just l) = if lType l == lt then pure (Just l)
-                         else fail $ "Bad label; expecting " ++ show lt
+pLabel :: LabelType -> Parser (Maybe Text)
+pLabel lt = (optionMaybe . try $
+             (char '[' *> typ lt *> pIdString <* string "]:" <* spaces))
+  where typ BlockLabel = return ()
+        typ FootnoteLabel = void $ char '^'
 
-pBlockLabel :: Parser (Maybe Label)
+pBlockLabel :: Parser (Maybe Text)
 pBlockLabel = pLabel BlockLabel
 
 -- Block parsers
@@ -135,11 +132,9 @@ pBlock = filter notNil <$> sepBy block indentSame
 pNewBlock :: Parser [RBlock]
 pNewBlock = indentNew *> pBlock <* popIndent
 
-pNewLines :: Parser [RSLine]
-pNewLines = (:) <$> (indentNew *> (RSpans <$> pSpan) <* optional eol)
-                <*> sepEndBy (RSpans <$> (indentSame *> pSpan)
-                              <|> (RNewLine <$ blankline))
-                             eol
+pNewLines :: Parser [[RSpan]]
+pNewLines = (:) <$> (indentNew *> pSpan <* optional eol)
+                <*> sepEndBy ((indentSame *> pSpan) <|> ([] <$ blankline)) eol
                 <*  popIndent
 
 pIndentedLines :: Parser Text
@@ -208,7 +203,7 @@ pText s =
 
 pQuote :: Parser RSpan
 pQuote = RSQuote <$> (try (string "``")
-                     *> option mempty (char '{' *> pIdString <* char '}'))
+                     *> optionMaybe (char '{' *> pIdString <* char '}'))
                 <*> (pSpan <* string "''")
 
 pLit :: Parser RSpan
