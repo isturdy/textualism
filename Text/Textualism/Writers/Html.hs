@@ -8,14 +8,19 @@ import           Control.Applicative
 import           Control.Lens                hiding (pre)
 import           Data.Char
 import           Data.Default.Class
+import           Data.Foldable
 import qualified Data.List                   as L
 import           Data.Monoid
 import           Data.Text                   hiding (cons)
-import           Prelude                     hiding (div, unlines)
-import           Text.Blaze.Html5
+import           Data.Time.Format
+import           Prelude                     hiding (div, mapM_, sequence_,
+                                              unlines)
+import           System.Locale
+import           Text.Blaze.Html5            hiding (dt)
+import qualified Text.Blaze.Html5            as H
 import           Text.Blaze.Html5.Attributes hiding (id)
 import qualified Text.Blaze.Html5.Attributes as A
-import           Text.Blaze.Internal         (Attributable, textValue)
+import           Text.Blaze.Internal         (Attributable, text, textValue)
 
 import           Text.Textualism.Types
 
@@ -23,6 +28,9 @@ data WriterOptions = WriterOptions {
                        footnoteStyle :: FootnoteStyle
                      , idPrefix      :: Text
                      , mathRenderer  :: MathRenderer
+                     , titleLink     :: Maybe Text
+                     , dateFormat    :: Maybe String
+                     , timeLocale    :: TimeLocale
                      }
 
 instance Default WriterOptions where
@@ -30,6 +38,9 @@ instance Default WriterOptions where
           footnoteStyle = Numbers
         , idPrefix      = ""
         , mathRenderer  = MathJaxTex
+        , titleLink     = Nothing
+        , dateFormat    = Just "%e %b %y"
+        , timeLocale    = defaultTimeLocale
         }
 
 data FootnoteStyle = Numbers
@@ -40,8 +51,24 @@ data FootnoteStyle = Numbers
 data MathRenderer = MathJaxTex
                   deriving (Show)
 
-writeHtml :: WriterOptions -> Document -> Html
-writeHtml cfg (Document hd fns bs) = mapM_ (writeBlock cfg) bs
+writeHtml :: WriterOptions -> Document -> (Meta, Html)
+writeHtml cfg (Document mt dt ttl bs fns hdrs) =
+  let hd = case ttl of
+        Nothing -> return ()
+        Just t  -> let ttl' = mapM_ (writeSpan cfg) t
+                   in H.header $ do
+                     h1 $ maybe ttl'
+                                (\lnk -> a ! href (toValue lnk) $ ttl')
+                                (titleLink cfg)
+                     case (dt, dateFormat cfg) of
+                       (Just d, Just df) ->
+                         let locale = timeLocale cfg
+                         in  time ! datetime
+                                      (toValue $ formatTime locale "%d %b %y" d)
+                                  $ toHtml (formatTime locale df d)
+                       _ -> return ()
+  in (mt, article ! (A.id . toValue $ idPrefix cfg)
+                  $ hd >> mapM_ (writeBlock cfg) bs >> writeFootnotes cfg fns)
 
 writeBlock :: WriterOptions -> Block -> Html
 writeBlock cfg bl =
@@ -98,7 +125,16 @@ writeSpan cfg s =
                     $ script ! type_ (textValue "math/tex") $ toHtml t
 
 writeFootnotes :: WriterOptions -> [Footnote] -> Html
-writeFootnotes cfg =
+writeFootnotes _cfg [] = return ()
+writeFootnotes cfg fns = ol ! class_ (textValue "footnotes") $ mapM_ writeFn fns
+  where
+    pref = mappend (idPrefix cfg)
+    mkId = A.id . toValue . pref
+    bkref n = a ! class_ (textValue "fn-backref")
+                ! href (textValue . pref . mappend "fnmark-" . pack $ show n)
+                $ text "^ "
+    writeFn (Footnote n bs) = li ! (mkId . mappend "fn-" . pack $ show n)
+                               $ bkref n >> mapM_ (writeBlock cfg) bs
 
 align :: Alignment -> Text
 align Centered     = "center"
@@ -109,7 +145,7 @@ align AlignRight   = "right"
 fnSymbol :: FootnoteStyle -> Int -> Html
 fnSymbol Numbers = toHtml
 fnSymbol Letters = toHtml . chr . (+96) . flip rem 26
-fnSymbol Symbols = (fnSymbols !!) . (\x -> x - 1) . flip rem 6
+fnSymbol Symbols = (fnSymbols !!) . flip rem 6 . (\x -> x - 1)
 
 fnSymbols :: [Html]
 fnSymbols = toHtml <$> ['*', '†', '‡', '§', '‖', '¶']

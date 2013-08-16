@@ -2,62 +2,68 @@
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Text.Textualism.Parser where
+module Text.Textualism.Parser (
+    parseDocument
+  , parseSpans
+  ) where
 
 import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
+import           Data.Bifunctor
 import           Data.Char
-import qualified Data.List                 as L
-import qualified Data.Map                  as M
+import qualified Data.List             as L
+import qualified Data.Map              as M
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Text                 hiding (count, filter, length, span)
-import qualified Data.Text                 as T
-import           Prelude                   hiding (span)
-import           Text.Parsec               hiding (many, optional, parse, space,
-                                            spaces, (<|>))
-import           Text.Parsec.Text          ()
+import           Data.Text             hiding (count, filter, length, span)
+import qualified Data.Text             as T
+import           Prelude               hiding (span)
+import           Text.Parsec           hiding (many, optional, parse, space,
+                                        spaces, (<|>))
+import           Text.Parsec.Text      ()
 
-import           Text.Textualism.Normalize
 import           Text.Textualism.Types
-import           Text.Textualism.Util
 
 type Parser = Parsec Text ParserState
-
-newtype Warning = Warning Text
 
 data ParserState = ParserState {
     _indents :: [Int]
   , _refs    :: Refs
+  , _fnNum   :: Int
   }
 makeLenses ''ParserState
 
 initialState :: ParserState
-initialState = ParserState [] (Refs mempty mempty)
+initialState = ParserState [] (Refs mempty mempty) 0
 
 getIndent :: Parser Int
-getIndent = liftM (L.head . (^.indents)) getState
+getIndent = L.head . (^.indents) <$> getState
 
 pushIndent :: Int -> Parser ()
-pushIndent n = modifyState (indents %~ (n:))
+pushIndent n = modifyState $ indents %~ (n:)
 
 -- This is partial, but safe as now used (paired with pushIndent)
 popIndent :: Parser ()
-popIndent = modifyState (indents %~ L.tail)
+popIndent = modifyState $ indents %~ L.tail
 
-addFn :: Text -> [RBlock] -> Parser ()
-addFn fnid fntxt = modifyState (refs.footnoteMap %~ M.insert fnid fntxt)
+addFn :: FNId -> [RBlock] -> Parser ()
+addFn fnid fntxt = modifyState $ refs.footnoteMap %~ M.insert fnid fntxt
 
 addLink :: Text -> Text -> Parser ()
-addLink lid link = modifyState (refs.linkMap %~ M.insert lid link)
+addLink lid link = modifyState $ refs.linkMap %~ M.insert lid link
+
+bumpFnNum :: Parser Int
+bumpFnNum = modifyState (fnNum %~ succ) *> ((^.fnNum) <$> getState)
 
 parse :: Parser a -> String -> Text -> Either ParseError a
 parse p = runParser p initialState
 
-parseDocument :: String -> Text -> Either Text Document
-parseDocument source t =
-  mapLeft (pack . show) (parse pDocument source t) >>= normalize
+parseDocument :: String -> Text -> Either Text RDocument
+parseDocument source t = first (pack . show) (parse pDocument source t)
+
+parseSpans :: Text -> Maybe [RSpan]
+parseSpans = either (const Nothing) Just . parse pSpan ""
 
 -- Random parsec utilities
 litspace :: Parser ()
@@ -78,14 +84,11 @@ spaces = void $ many space
 eol :: Parser ()
 eol = void $ char '\n' <|> (char '\r' <* optional (char '\n'))
 
-optionEol :: Parser ()
-optionEol = option () eol
-
 blankline :: Parser ()
 blankline = try $ many space *> eol
 
-indent :: Parser Int
-indent = lookAhead (length <$> many litspace)
+--indent :: Parser Int
+--indent = lookAhead (length <$> many litspace)
 
 indentSame :: Parser ()
 indentSame = void . try $ getIndent >>= flip count litspace
@@ -95,9 +98,6 @@ indentNew = void . try $ do
             i <- getIndent
             l <- length <$> many1 litspace
             if l > i then pushIndent l else fail "Indent Expected"
-
-paragraphBreak :: Parser ()
-paragraphBreak = eol *> blankline *> indentSame
 
 pIdString :: Parser Text
 pIdString = pack <$> many1 (alphaNum <|> char '_' <|> char '\'')
@@ -117,10 +117,18 @@ pLabel lt = (optionMaybe . try $
 pBlockLabel :: Parser (Maybe Text)
 pBlockLabel = pLabel BlockLabel
 
--- Block parsers
-
 pDocument :: Parser RDocument
-pDocument = undefined
+pDocument = RDocument <$> pMeta <*> pBlock <*> (_refs <$> getState)
+
+pMeta :: Parser Meta
+pMeta = option mempty $
+        (try (string "~~~~~") *> (M.fromList <$> many item)) <* string "~~~~~"
+  where item = (,) <$> (pack <$> many1 (noneOf ":\r\n")
+                   <*  char ':' <* many space)
+                   <*> (pack <$> many1 (noneOf "\r\n"))
+                   <*  eol
+
+-- Block parsers
 
 -- Parse a sequence of blocks at the present indentation
 pBlock :: Parser [RBlock]
@@ -182,7 +190,7 @@ pBlockMath = RBMath <$> (pBlockSym "$$$" *> pBlockLabel) <*> pIndentedLines
 
 pBlockRef :: Parser RBlock
 pBlockRef = RBNil <$ (join . try $ char '[' *>
-            (((addFn   <$ char '^') <*> (pIdString <* string "]:\n")
+            (((addFn   <$ char '^') <*> (Right <$> pIdString <* string "]:\n")
                                     <*> pNewBlock)
          <|> ((addLink <$ char '@') <*> (pIdString <* string "]:" <* litspaces)
                                     <*> (pack <$> (many1 $ noneOf "\r\n"))
@@ -220,5 +228,23 @@ pMath = char '$' *> option Inline (Display <$ char '$') >>= \mtype ->
 pEm :: Parser RSpan
 pEm = char '*' *> (RSEm <$> pSpanS "*") <* char '*'
 
+pDisplay :: Parser (Maybe [RSpan])
+pDisplay = optionMaybe $ between (char '{') (char '}') pSpan
+
 pRef :: Parser RSpan
-pRef = undefined
+pRef = char '[' *> (join . option ref $ (fn <$ char '^') <|> link <$ char '@')
+ where  rid = pIdString <* char ']'
+        fn   = RSFn . Right <$> rid
+        ref  = RSRef <$> rid <*> pDisplay
+        link = RSLink <$> rid <*> pDisplay
+
+-- Anonymous references. A bit of code duplication; could this be partially
+-- unified with above?
+pARef :: Parser RSpan
+pARef = char '<' *> (join . option ref $ (fn <$ char '^') <|> link <$ char '@')
+  where rid = pIdString <* char '>'
+        fn = do fnid <- Left <$> bumpFnNum
+                pure <$> RBPar Nothing <$> pSpanS ">" >>= addFn fnid
+                return $ RSFn fnid
+        ref = undefined
+        link = undefined

@@ -4,8 +4,9 @@
 module Text.Textualism.Types where
 
 import           Control.Lens
-import           Data.Map     (Map)
-import           Data.Text    hiding (foldl')
+import           Data.Map            (Map)
+import           Data.Text           hiding (foldl')
+import           Data.Time.LocalTime
 
 -- Global types
 
@@ -25,12 +26,7 @@ data Alignment = Centered
 
 -- The raw document tree--declaration order
 
-type Header = Map Text RHValue
-
-data RHValue = RVList [RSpan]
-             | RVBlock RBlock
-             | RVExplicit Text
-             deriving (Show)
+type Meta = Map Text Text
 
 data RBlock = RBHeader {
                 rLevel    :: Int
@@ -54,7 +50,7 @@ data RBlock = RBHeader {
             | RBAligned {
                 rAlignment :: Alignment
               , rLabel     :: Maybe Text
-              , rLines     :: [[RSpan]] -- Outer level must never be empty
+              , rLines     :: [[RSpan]] -- Outer level must not be empty
               }
             | RBMath {
                 rLabel    :: Maybe Text
@@ -73,21 +69,23 @@ data Label = Label {
              , lName :: Text
              } deriving (Eq, Show)
 
+type FNId = Either Int Text
+
 data RSpan = RSQuote (Maybe Text) [RSpan]
            | RSLit [Text] Text
            | RSEm [RSpan]
            | RSText Text
            | RSMath MathType Text
-           | RSRef LabelType Text
-           | RIFn  [RSpan]
-           | RILink LabelType Text
+           | RSRef Text (Maybe [RSpan])
+           | RSFn FNId
+           | RSLink Text (Maybe [RSpan])
            deriving (Show)
 
-data RDocument = RDocument Header [RBlock] Refs
+data RDocument = RDocument Meta [RBlock] Refs
                deriving (Show)
 
 data Refs = Refs {
-              _footnoteMap :: Map Text [RBlock]
+              _footnoteMap :: Map FNId [RBlock]
             , _linkMap     :: Map Text Text
             } deriving (Show)
 makeLenses ''Refs
@@ -101,7 +99,7 @@ data Block = BPar {
            | BHeader {
                level    :: Int
              , label    :: Maybe Text
-             , number   :: Int
+             , number   :: [Int]
              , contentS :: [Span]
              }
            | BQuote {
@@ -121,7 +119,7 @@ data Block = BPar {
            | BAligned {
                alignment :: Alignment
              , label     :: Maybe Text
-             , lines     :: [[Span]] -- Outer level must never be empty
+             , lines     :: [[Span]] -- Outer level must not be empty
              }
            | BHLine
            deriving (Show)
@@ -131,6 +129,8 @@ data Span = SText Text
           | SQuote (Maybe Text) [Span]
           | SLit [Text] Text
           | SFn Int
+          | SLink Text (Maybe [Span])
+          | SRef Text (Maybe [Span])
           | SMath MathType Text
           deriving (Show)
 
@@ -138,8 +138,11 @@ data Footnote = Footnote Int [Block]
               deriving (Show)
 
 data Document = Document {
-                  _header    :: Header
-                , _footnotes :: [Footnote]
+                  _header    :: Meta
+                , _date      :: Maybe LocalTime
+                , _title     :: Maybe [Span]
                 , _blocks    :: [Block]
+                , _footnotes :: [Footnote]
+                , _labels    :: Map Text [Int]
                 } deriving (Show)
 makeLenses ''Document

@@ -10,25 +10,27 @@ import           Control.Applicative
 import           Control.Lens
 import           Control.Monad.State.Strict
 import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as M
-import           Data.Maybe
 import           Data.Monoid
-import           Data.Text
+import           Data.Text                  hiding (reverse, take)
+import           Data.Time.Format
+import           System.Locale
 
+import           Text.Textualism.Parser
 import           Text.Textualism.Types
 
 data NormState = NormState {
                    _fns   :: [Footnote]
                  , _fnNum :: Int
                  , _refs  :: Refs
-                 , _hNum  :: Map Int Int
+                 , _hNum  :: [Int] -- Present hierarchical section numbers
+                 , _hMap  :: Map Text [Int] -- Labelled sections
                  }
 makeLenses ''NormState
 
 type Norm = StateT NormState (Either Text)
 
-hdNum :: Int -> Norm Int
-hdNum lvl = fromJust <$> (hNum.at lvl <%= (Just . maybe 0 succ))
+hdNum :: Int -> Norm [Int]
+hdNum lvl = hNum <%= ((_last %~ succ) . take lvl)
 
 makeFn :: [RBlock] -> Norm Int
 makeFn fn = do
@@ -38,9 +40,14 @@ makeFn fn = do
   return n
 
 normalize :: RDocument -> Either Text Document
-normalize (RDocument hd bs rfs) =
-  runStateT (traverse (normBlock True) bs) (NormState [] 1 rfs mempty)
-  <&> \(bs', st) -> Document hd (st^.fns) bs'
+normalize (RDocument mt bs rfs) =
+  flip evalStateT (NormState [] 1 rfs [] mempty) $
+  Document mt
+           (mt^.at "date" >>= parseTime defaultTimeLocale "%Y-%m-%d" . unpack)
+       <$> traverse (traverse (normSpan True)) (mt^.at "title" >>= parseSpans)
+       <*> traverse (normBlock True) bs
+       <*> use fns
+       <*> use hMap
 
 normBlock :: Bool -> RBlock -> Norm Block
 normBlock fnp b =
@@ -69,9 +76,10 @@ normSpan fnp s =
     RSEm ss      -> SEm <$> norm ss
     RSText t     -> pure $ SText t
     RSMath tp t  -> pure $ SMath tp t
-    RSRef FootnoteLabel fnid ->
+    RSFn fnid    ->
       if fnp
-      then M.lookup fnid <$> use (refs.footnoteMap) >>= \case
+      then use (refs.footnoteMap.at fnid) >>= \x -> case x of
              Just fn -> SFn <$> makeFn fn
-             Nothing -> lift . Left $ "Invalid footnote id: " <> fnid
+             Nothing -> lift . Left $ "Invalid footnote id: "
+                                      <> pack (show fnid)
       else lift $ Left "Nested footnotes are strictly prohibited."
