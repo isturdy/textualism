@@ -76,6 +76,7 @@ normSpan fnp s =
     RSEm ss      -> SEm <$> norm ss
     RSText t     -> pure $ SText t
     RSMath tp t  -> pure $ SMath tp t
+    RSRef t ss   -> SRef t <$>
     RSFn fnid    ->
       if fnp
       then use (refs.footnoteMap.at fnid) >>= \x -> case x of

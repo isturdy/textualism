@@ -201,7 +201,8 @@ pSpan :: Parser [RSpan]
 pSpan = pSpanS ""
 
 pSpanS :: String -> Parser [RSpan]
-pSpanS s = many (pText s <|> pQuote <|> pEm <|> pLit <|> pMath)
+pSpanS s = many (pText s <|> pQuote <|> pEm <|> pLit <|> pRef <|> pARef
+                 <|> pMath)
 
 pText :: String -> Parser RSpan
 pText s =
@@ -242,9 +243,10 @@ pRef = char '[' *> (join . option ref $ (fn <$ char '^') <|> link <$ char '@')
 -- unified with above?
 pARef :: Parser RSpan
 pARef = char '<' *> (join . option ref $ (fn <$ char '^') <|> link <$ char '@')
-  where rid = pIdString <* char '>'
-        fn = do fnid <- Left <$> bumpFnNum
-                pure <$> RBPar Nothing <$> pSpanS ">" >>= addFn fnid
+  where fn = do fnid <- Left <$> bumpFnNum
+                pure <$> RBPar Nothing <$> (pSpanS ">" <* char '>')
+                  >>= addFn fnid
                 return $ RSFn fnid
-        ref = undefined
-        link = undefined
+        ref = RSRef <$> (pIdString <* char '>') <*> pDisplay
+        link = RSLink <$> (pack <$> many1 (noneOf "\r\n>") <* char '>')
+                      <*> pDisplay
