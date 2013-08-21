@@ -35,7 +35,7 @@ data ParserState = ParserState {
 makeLenses ''ParserState
 
 initialState :: ParserState
-initialState = ParserState [] (Refs mempty mempty) 0
+initialState = ParserState [0] (Refs mempty mempty) 0
 
 getIndent :: Parser Int
 getIndent = L.head . (^.indents) <$> getState
@@ -63,7 +63,7 @@ parseDocument :: String -> Text -> Either Text RDocument
 parseDocument source t = first (pack . show) (parse pDocument source t)
 
 parseSpans :: Text -> Maybe [RSpan]
-parseSpans = either (const Nothing) Just . parse pSpan ""
+parseSpans = either (const Nothing) Just . parse pSpans ""
 
 -- Random parsec utilities
 litspace :: Parser ()
@@ -91,7 +91,11 @@ blankline = try $ many space *> eol
 --indent = lookAhead (length <$> many litspace)
 
 indentSame :: Parser ()
-indentSame = void . try $ getIndent >>= flip count litspace
+indentSame = try $ do
+  i <- getIndent
+  i' <- length <$> many litspace
+  if i /= i' then fail $ "New indent (" <> show i <> "); expected " <> show i'
+             else return ()
 
 indentNew :: Parser ()
 indentNew = void . try $ do
@@ -122,8 +126,10 @@ pDocument = RDocument <$> pMeta <*> pBlock <*> (_refs <$> getState)
 
 pMeta :: Parser Meta
 pMeta = option mempty $
-        (try (string "~~~~~") *> (M.fromList <$> many item)) <* string "~~~~~"
-  where item = (,) <$> (pack <$> many1 (noneOf ":\r\n")
+        (try (string "~~~~~" *> eol)
+          *> (M.fromList <$> many item))
+         <*  string "~~~~~" <* eol <* blankline
+  where item = (,) <$> (pack <$> many1 (noneOf "~:\r\n")
                    <*  char ':' <* many space)
                    <*> (pack <$> many1 (noneOf "\r\n"))
                    <*  eol
@@ -132,17 +138,18 @@ pMeta = option mempty $
 
 -- Parse a sequence of blocks at the present indentation
 pBlock :: Parser [RBlock]
-pBlock = filter notNil <$> sepBy block indentSame
-  where block = pBlockPar <|> pBlockQuote <|> pBlockLit <|> pHeader <|> pAligned
-            <|> pLine <|> pBlockMath <|> pBlockRef
+pBlock = filter notNil <$> sepBy (block <* many blankline) indentSame
+  where block = pBlockRef <|> pBlockQuote <|> pBlockLit <|> pHeader
+            <|> pAligned <|> pLine <|> pBlockMath <|> pBlockPar
+
 -- Parse a sequence of blocks at a new (higher) indentation, and remove the
 -- indent.
 pNewBlock :: Parser [RBlock]
 pNewBlock = indentNew *> pBlock <* popIndent
 
 pNewLines :: Parser [[RSpan]]
-pNewLines = (:) <$> (indentNew *> pSpan <* optional eol)
-                <*> sepEndBy ((indentSame *> pSpan) <|> ([] <$ blankline)) eol
+pNewLines = (:) <$> (indentNew *> pSpans <* optional eol)
+                <*> sepEndBy ((indentSame *> pSpans) <|> ([] <$ blankline)) eol
                 <*  popIndent
 
 pIndentedLines :: Parser Text
@@ -163,10 +170,12 @@ pBlockLit = RBLit <$> (pBlockSym "```" *> pBlockLabel)
                   <*> pIndentedLines
 
 pBlockQuote :: Parser RBlock
-pBlockQuote = RBQuote <$> (pBlockSym ">" *> pBlockLabel) <*> pSpan <*> pBlock
+pBlockQuote = RBQuote <$> (pBlockSym ">" *> pBlockLabel)
+                      <*> (pSpans <* eol)
+                      <*> pNewBlock
 
 pBlockPar :: Parser RBlock
-pBlockPar = RBPar <$> (many space *> pBlockLabel) <*> pSpan
+pBlockPar = RBPar <$> pBlockLabel <*> pSpans1
 
 -- Aligned block. Single newlines are significant.
 pAligned :: Parser RBlock
@@ -180,7 +189,7 @@ pAligned = RBAligned <$> (pAlignment <* spaces)
 
 pHeader :: Parser RBlock
 pHeader = RBHeader <$> (length <$> many1 (char '#') <* spaces)
-                   <*> pBlockLabel <*> pSpan
+                   <*> pBlockLabel <*> pSpans
 
 pLine :: Parser RBlock
 pLine = RBHLine <$ (try (string "-----") *> many (noneOf "\r\n") *> eol)
@@ -197,56 +206,64 @@ pBlockRef = RBNil <$ (join . try $ char '[' *>
                                     <*  char '\n')))
 
 -- Span parsers
-pSpan :: Parser [RSpan]
-pSpan = pSpanS ""
+pSpans :: Parser [RSpan]
+pSpans = many pSpan
 
-pSpanS :: String -> Parser [RSpan]
-pSpanS s = many (pText s <|> pQuote <|> pEm <|> pLit <|> pRef <|> pARef
-                 <|> pMath)
+pSpansNoEm :: Parser [RSpan]
+pSpansNoEm = many pSpanNoEm
 
-pText :: String -> Parser RSpan
-pText s =
-  RSText . pack <$> many1 (escaped <|> notSpecial)
-  where notSpecial = noneOf (s <> "`'<\r\n")
-        escaped = char '~' *> anyChar
+pSpans1 :: Parser [RSpan]
+pSpans1 = many1 pSpan
+
+pSpan :: Parser RSpan
+pSpan = pSpanNoEm <|> pEm
+
+pSpanNoEm :: Parser RSpan
+pSpanNoEm = pText <|> pQuote <|> pLit <|> pRef <|> pARef <|> pMath
+
+pText :: Parser RSpan
+pText = RSText . pack <$> many1 (escaped <|> notSpecial)
+  where escaped = char '~' *> anyChar
+        notSpecial = noneOf "`'<>\r\n[]*"
 
 pQuote :: Parser RSpan
 pQuote = RSQuote <$> (try (string "``")
-                     *> optionMaybe (char '{' *> pIdString <* char '}'))
-                <*> (pSpan <* string "''")
+                     *> optionMaybe (char '{' *> pIdString <* char '}' <* many space))
+                <*> (pSpans <* string "''")
 
 pLit :: Parser RSpan
 pLit = RSLit <$> (char '`' *> option [] (char '{' *> pIdStrings <* char '}'))
             <*> (pLitText <* char '`')
   where pLitText = pack <$> many (try ('`' <$ string "``")
-                              <|> noneOf "`\r\n")
+                                  <|> noneOf "`\r\n")
 
 pMath :: Parser RSpan
-pMath = char '$' *> option Inline (Display <$ char '$') >>= \mtype ->
+pMath = do
+  mtype <- char '$' *> option Inline (Display <$ char '$')
   RSMath mtype <$> (pack <$> many (noneOf "$\r\n"))
                <*  if mtype == Inline then char '$' else char '$' >> char '$'
 
 pEm :: Parser RSpan
-pEm = char '*' *> (RSEm <$> pSpanS "*") <* char '*'
+pEm = char '*' *> (RSEm <$> pSpansNoEm) <* char '*'
 
 pDisplay :: Parser (Maybe [RSpan])
-pDisplay = optionMaybe $ between (char '{') (char '}') pSpan
+pDisplay = optionMaybe $ between (char '{') (char '}') pSpans
 
 pRef :: Parser RSpan
-pRef = char '[' *> (join . option ref $ (fn <$ char '^') <|> link <$ char '@')
+pRef = char '[' *> (join . option ref $ (fn <$ char '^')
+                    <|> (link <$ char '@'))
  where  rid = pIdString <* char ']'
         fn   = RSFn . Right <$> rid
         ref  = RSRef <$> rid <*> pDisplay
-        link = RSLink <$> rid <*> pDisplay
+        link = RSLink <$> (Right <$> rid) <*> pDisplay
 
 -- Anonymous references. A bit of code duplication; could this be partially
 -- unified with above?
 pARef :: Parser RSpan
-pARef = char '<' *> (join . option ref $ (fn <$ char '^') <|> link <$ char '@')
+pARef = char '<' *> (join $ (fn <$ char '^') <|> (link <$ char '@'))
   where fn = do fnid <- Left <$> bumpFnNum
-                pure <$> RBPar Nothing <$> (pSpanS ">" <* char '>')
+                pure <$> RBPar Nothing <$> pSpans <*  char '>'
                   >>= addFn fnid
                 return $ RSFn fnid
-        ref = RSRef <$> (pIdString <* char '>') <*> pDisplay
-        link = RSLink <$> (pack <$> many1 (noneOf "\r\n>") <* char '>')
+        link = RSLink <$> (Left . pack <$> many1 (noneOf "\r\n>") <* char '>')
                       <*> pDisplay

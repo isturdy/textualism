@@ -40,3 +40,15 @@ library
 source-repository head
   type: git
   location: https://github.com/isturdy/textualism
+
+test-suite tests
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is:        Tests.hs
+
+  build-depends:
+    textualism,
+    base ==4.6.*,
+    HUnit ==1.2.5.*,
+    test-framework,
+    test-framework-hunit

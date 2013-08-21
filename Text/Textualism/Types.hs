@@ -71,6 +71,8 @@ data Label = Label {
 
 type FNId = Either Int Text
 
+type Url = Text
+
 data RSpan = RSQuote (Maybe Text) [RSpan]
            | RSLit [Text] Text
            | RSEm [RSpan]
@@ -78,7 +80,7 @@ data RSpan = RSQuote (Maybe Text) [RSpan]
            | RSMath MathType Text
            | RSRef Text (Maybe [RSpan])
            | RSFn FNId
-           | RSLink Text (Maybe [RSpan])
+           | RSLink (Either Url Text) (Maybe [RSpan])
            deriving (Show)
 
 data RDocument = RDocument Meta [RBlock] Refs
@@ -130,7 +132,7 @@ data Span = SText Text
           | SLit [Text] Text
           | SFn Int
           | SLink Text (Maybe [Span])
-          | SRef Text (Maybe [Span])
+          | SRef Text [Int] (Maybe [Span])
           | SMath MathType Text
           deriving (Show)
 
@@ -143,6 +145,5 @@ data Document = Document {
                 , _title     :: Maybe [Span]
                 , _blocks    :: [Block]
                 , _footnotes :: [Footnote]
-                , _labels    :: Map Text [Int]
                 } deriving (Show)
 makeLenses ''Document

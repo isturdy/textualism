@@ -2,6 +2,7 @@
 
 module Text.Textualism.Writers.Html (
     writeHtml
+  , WriterOptions(..)
   ) where
 
 import           Control.Applicative
@@ -52,7 +53,7 @@ data MathRenderer = MathJaxTex
                   deriving (Show)
 
 writeHtml :: WriterOptions -> Document -> (Meta, Html)
-writeHtml cfg (Document mt dt ttl bs fns hdrs) =
+writeHtml cfg (Document mt dt ttl bs fns) =
   let hd = case ttl of
         Nothing -> return ()
         Just t  -> let ttl' = mapM_ (writeSpan cfg) t
@@ -79,10 +80,11 @@ writeBlock cfg bl =
     BPar l ss          -> p !? (mkId <$> l) $ writeS ss
     BHeader lvl l _ ss -> hn lvl !? (mkId <$> l) $ writeS ss
     BQuote l cit cnt   -> div !? (mkId <$> l)
-                              ! class_ (textValue "blockquote") $ do
-                            blockquote $ writeB cnt
-                            p ! class_ (textValue "blockquote-citation")
-                              $ writeS cit
+                              ! class_ (textValue "blockquote")
+                              $ do
+                                blockquote $ writeB cnt
+                                p ! class_ (textValue "blockquote-citation")
+                                  $ writeS cit
     BLit l cs t      -> pre $ code !? (mkId <$> l)
                                    !  class_ (toValue $ intercalate " " cs)
                                    $  toHtml t
@@ -118,6 +120,11 @@ writeSpan cfg s =
                      ! href (textValue . cons '#' . pref
                              . mappend "fn" . pack $ show n)
                      $ fnSymbol (footnoteStyle cfg) n
+    SLink tgt ss -> a ! href (toValue tgt) $ maybe (toHtml tgt) write ss
+    SRef rid num mss -> case mss of
+      Just ss -> a ! href (toValue $ pref rid) $ write ss
+      Nothing -> a ! href (toValue $ pref rid)
+                   $ toHtml (L.concat . L.intersperse "." $ fmap show num)
     SMath tp t -> case mathRenderer cfg of
       MathJaxTex -> (if tp == Display
                      then (! customAttribute "mode" (textValue "display"))
@@ -131,7 +138,7 @@ writeFootnotes cfg fns = ol ! class_ (textValue "footnotes") $ mapM_ writeFn fns
     pref = mappend (idPrefix cfg)
     mkId = A.id . toValue . pref
     bkref n = a ! class_ (textValue "fn-backref")
-                ! href (textValue . pref . mappend "fnmark-" . pack $ show n)
+                ! href (textValue . mappend "#" . pref . mappend "fnmark-" . pack $ show n)
                 $ text "^ "
     writeFn (Footnote n bs) = li ! (mkId . mappend "fn-" . pack $ show n)
                                $ bkref n >> mapM_ (writeBlock cfg) bs

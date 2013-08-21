@@ -30,7 +30,7 @@ makeLenses ''NormState
 type Norm = StateT NormState (Either Text)
 
 hdNum :: Int -> Norm [Int]
-hdNum lvl = hNum <%= ((_last %~ succ) . take lvl)
+hdNum lvl = hNum <%= ((_last %~ succ) . take lvl . (<> repeat 0))
 
 makeFn :: [RBlock] -> Norm Int
 makeFn fn = do
@@ -38,6 +38,9 @@ makeFn fn = do
   n <- fnNum <<%= succ
   fns %= (Footnote n fn':)
   return n
+
+left :: a -> StateT NormState (Either a) b
+left = lift . Left
 
 normalize :: RDocument -> Either Text Document
 normalize (RDocument mt bs rfs) =
@@ -47,7 +50,6 @@ normalize (RDocument mt bs rfs) =
        <$> traverse (traverse (normSpan True)) (mt^.at "title" >>= parseSpans)
        <*> traverse (normBlock True) bs
        <*> use fns
-       <*> use hMap
 
 normBlock :: Bool -> RBlock -> Norm Block
 normBlock fnp b =
@@ -70,17 +72,23 @@ normSpan :: Bool -> RSpan -> Norm Span
 normSpan fnp s =
   let norm = traverse (normSpan fnp)
       {-# INLINE norm #-}
+      lkp l i = use (l.at i)
+                >>= maybe (left $ "Invalid reference: " <> i) pure
   in case s of
-    RSQuote t ss -> SQuote t <$> norm ss
-    RSLit ts t   -> pure $ SLit ts t
-    RSEm ss      -> SEm <$> norm ss
-    RSText t     -> pure $ SText t
-    RSMath tp t  -> pure $ SMath tp t
-    RSRef t ss   -> SRef t <$>
-    RSFn fnid    ->
+    RSQuote t ss  -> SQuote t <$> norm ss
+    RSLit ts t    -> pure $ SLit ts t
+    RSEm ss       -> SEm <$> norm ss
+    RSText t      -> pure $ SText t
+    RSMath tp t   -> pure $ SMath tp t
+    RSRef t ss    -> SRef t <$> lkp hMap t <*> traverse norm ss
+    RSLink lid ss -> SLink <$> either pure (lkp (refs.linkMap)) lid
+                           <*> traverse norm ss
+    RSFn fnid     ->
       if fnp
       then use (refs.footnoteMap.at fnid) >>= \x -> case x of
              Just fn -> SFn <$> makeFn fn
-             Nothing -> lift . Left $ "Invalid footnote id: "
-                                      <> pack (show fnid)
-      else lift $ Left "Nested footnotes are strictly prohibited."
+             Nothing -> left $ "Invalid footnote id: " <>
+                                 (case fnid of
+                                     Left  _ -> "bug in textualism"
+                                     Right n -> pack $ show n)
+      else left "Nested footnotes are strictly prohibited."
