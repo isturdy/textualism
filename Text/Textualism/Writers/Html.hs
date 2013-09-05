@@ -3,6 +3,7 @@
 module Text.Textualism.Writers.Html (
     writeHtml
   , WriterOptions(..)
+  , writePre
   ) where
 
 import           Control.Applicative
@@ -27,21 +28,25 @@ import           Text.Textualism.Types
 
 data WriterOptions = WriterOptions {
                        footnoteStyle :: FootnoteStyle
+                     , htmlId        :: Maybe Text
                      , idPrefix      :: Text
                      , mathRenderer  :: MathRenderer
                      , titleLink     :: Maybe Text
                      , dateFormat    :: Maybe String
                      , timeLocale    :: TimeLocale
+                     , highlighter   :: ([Text] -> Text -> Html)
                      }
 
 instance Default WriterOptions where
   def = WriterOptions {
           footnoteStyle = Numbers
+        , htmlId        = Nothing
         , idPrefix      = ""
         , mathRenderer  = MathJaxTex
         , titleLink     = Nothing
         , dateFormat    = Just "%e %b %y"
         , timeLocale    = defaultTimeLocale
+        , highlighter   = writePre
         }
 
 data FootnoteStyle = Numbers
@@ -51,6 +56,15 @@ data FootnoteStyle = Numbers
 
 data MathRenderer = MathJaxTex
                   deriving (Show)
+
+writePre :: [Text] -> Text -> Html
+writePre cs t =
+  pre !? (class_ . toValue . intercalate " " <$> nonEmpty cs) $ toHtml t
+  where nonEmpty [] = Nothing
+        nonEmpty l  = Just l
+
+writeHtmlStandalone :: WriterOptions -> Document -> Html
+writeHtmlStandalone cfg = docTypeHtml . snd . writeHtml cfg
 
 writeHtml :: WriterOptions -> Document -> (Meta, Html)
 writeHtml cfg (Document mt dt ttl bs fns) =
@@ -68,7 +82,7 @@ writeHtml cfg (Document mt dt ttl bs fns) =
                                       (toValue $ formatTime locale "%d %b %y" d)
                                   $ toHtml (formatTime locale df d)
                        _ -> return ()
-  in (mt, article ! (A.id . toValue $ idPrefix cfg)
+  in (mt, article !? (A.id . toValue <$> htmlId cfg)
                   $ hd >> mapM_ (writeBlock cfg) bs >> writeFootnotes cfg fns)
 
 writeBlock :: WriterOptions -> Block -> Html
@@ -85,9 +99,7 @@ writeBlock cfg bl =
                                 blockquote $ writeB cnt
                                 p ! class_ (textValue "blockquote-citation")
                                   $ writeS cit
-    BLit l cs t      -> pre $ code !? (mkId <$> l)
-                                   !  class_ (toValue $ intercalate " " cs)
-                                   $  toHtml t
+    BLit l cs t      -> ((highlighter cfg) cs t) !? (mkId <$> l)
     BMath l t        -> case mathRenderer cfg of
       MathJaxTex -> div !? (mkId <$> l)
                         !  class_ (textValue "math-display")
