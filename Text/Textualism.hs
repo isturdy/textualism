@@ -1,6 +1,7 @@
 module Text.Textualism (
     readDocument
   , writeHtml
+  , writeHtmlStandalone
   ) where
 
 import           Control.Monad

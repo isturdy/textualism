@@ -2,6 +2,7 @@
 
 module Text.Textualism.Writers.Html (
     writeHtml
+  , writeHtmlStandalone
   , WriterOptions(..)
   , writePre
   ) where
