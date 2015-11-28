@@ -15,15 +15,53 @@ stability:	     experimental
 library
   exposed-modules:
     Text.Textualism
+    Text.Textualism.Writers.Html
+  other-modules:
+    Text.Textualism.Normalize
+    Text.Textualism.Parser
+    Text.Textualism.Types
   GHC-Options:
     -Wall
 
   build-depends:
     base ==4.*,
-    blaze-html >=0.5 && <0.7,
-    blaze-markup >=0.5.1 && <0.6,
-    text ==0.11.*
+    bifunctors >= 3.2,
+    blaze-html >= 0.5,
+    blaze-markup >= 0.5.1,
+    containers >= 0.5.0.0,
+    data-default-class >= 0.0.1,
+    lens >= 3.0,
+    mtl >= 2.1,
+    parsec >= 3.0,
+    text >= 0.11.0.0,
+    time >= 1.3
+
+executable textualism
+  main-is:        Textualism.hs
+  hs-source-dirs: src
+  GHC-Options:    -Wall
+
+  build-depends:
+    textualism,
+    base ==4.*,
+    blaze-html >=0.5,
+    data-default-class >= 0.0.1,
+    lens >= 3.0,
+    optparse-applicative >=0.5.2,
+    text >=0.11.0.0
 
 source-repository head
   type: git
   location: https://github.com/isturdy/textualism
+
+test-suite tests
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is:        Tests.hs
+
+  build-depends:
+    textualism,
+    base ==4.6.*,
+    HUnit ==1.2.5.*,
+    test-framework,
+    test-framework-hunit
