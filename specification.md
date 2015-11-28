@@ -37,7 +37,7 @@ A header is an optional set of key-value pairs begun and ended with three tildes
   + Explicit: `%%%` on the key's line (any whitespace allowed); ends with the next dedent (using the explicit dedent rules). No formatting processed.
 
 ## Indent blocks
-All internal blocks must start at the beginning of a line.
+All internal blocks must start at the beginning of a line (after indents)
 + %%%: explicit block
   + %%% language other attributes
     + e.g. %%% haskell literate
@@ -52,9 +52,12 @@ All internal blocks must start at the beginning of a line.
 + |, <|>, |>, <|: aligned blocks
   + Newlines produce line breaks.
   + ragged on edges with angle brackets.
-+ +: unordered list (concatenates)
-+ #: ordered list (concatenates)
-  + simplified internal references.
++ Lists:
+  + +: unordered list (concatenates).
+  + #: ordered list (concatenates).
+  + List (rather than item) labels should be attached to the indicator, e.g.
+	`#foo [itemlabel]: content`
+  + For a list of blocks, only the item label should be on the first line.
 + ----- (or more): horizontal line. Ignores contents.
 + `/#+/`: header (with level).
 

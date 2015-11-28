@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
@@ -6,14 +7,12 @@ module Text.Textualism.Normalize (
     normalize
   ) where
 
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad.State.Strict
 import           Data.Map.Strict            (Map)
 import           Data.Monoid
 import           Data.Text                  hiding (reverse, take)
 import           Data.Time.Format
-import           System.Locale
 
 import           Text.Textualism.Parser
 import           Text.Textualism.Types
@@ -45,11 +44,12 @@ left = lift . Left
 normalize :: RDocument -> Either Text Document
 normalize (RDocument mt bs rfs) =
   flip evalStateT (NormState [] 1 rfs [] mempty) $
-  Document mt
-           (mt^.at "date" >>= parseTime defaultTimeLocale "%Y-%m-%d" . unpack)
-       <$> traverse (traverse (normSpan True)) (mt^.at "title" >>= parseSpans)
-       <*> traverse (normBlock True) bs
-       <*> use fns
+  Document
+    mt
+    (mt^.at "date" >>= parseTimeM True defaultTimeLocale "%Y-%m-%d" . unpack)
+    <$> traverse (traverse (normSpan True)) (mt^.at "title" >>= parseSpans)
+    <*> traverse (normBlock True) bs
+    <*> use fns
 
 normBlock :: Bool -> RBlock -> Norm Block
 normBlock fnp b =
@@ -58,20 +58,23 @@ normBlock fnp b =
       normB = traverse (normBlock fnp)
       {-# INLINE normB #-}
   in case b of
-    RBHeader lvl l ss -> BHeader lvl l <$> hdNum lvl <*> normS ss
-    RBLit l cs c      -> pure $ BLit l cs c
-    RBQuote l c bs    -> BQuote l <$> normS c <*> normB bs
-    RBPar l ss        -> BPar l <$> normS ss
     RBAligned a l ls  -> BAligned a l <$> traverse normS ls
-    RBMath l ct       -> pure $ BMath l ct
+    RBHeader lvl l ss -> BHeader lvl l <$> hdNum lvl <*> normS ss
     RBHLine           -> pure BHLine
+    RBList _ _ _      -> error "Bug at Text.Textualism.Normalize.normBlock: \
+                               \RBList handling not implemented."
+    RBLit l cs c      -> pure $ BLit l cs c
+    RBMath l ct       -> pure $ BMath l ct
     RBNil             -> error "Bug at Text.Textualism.Normalize.normBlock: \
                                \RBNil escaped parser."
+    RBPar l ss        -> BPar l <$> normS ss
+    RBQuote l c bs    -> BQuote l <$> normS c <*> normB bs
 
 normSpan :: Bool -> RSpan -> Norm Span
 normSpan fnp s =
   let norm = traverse (normSpan fnp)
       {-# INLINE norm #-}
+--      lkp :: _
       lkp l i = use (l.at i)
                 >>= maybe (left $ "Invalid reference: " <> i) pure
   in case s of

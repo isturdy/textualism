@@ -123,8 +123,18 @@ data Block = BPar {
              , label     :: Maybe Text
              , lines     :: [[Span]] -- Outer level must not be empty
              }
+           | BList {
+               listType :: ListType
+             , label    :: Maybe Text
+             , list     :: List
+             }
            | BHLine
            deriving (Show)
+
+data List = LBlock [Block]
+          | LSpan [Span]
+          deriving (Show)
+
 
 data Span = SText Text
           | SEm [Span]

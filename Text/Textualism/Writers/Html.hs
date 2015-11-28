@@ -18,12 +18,11 @@ import           Data.Text                   hiding (cons)
 import           Data.Time.Format
 import           Prelude                     hiding (div, mapM_, sequence_,
                                               unlines)
-import           System.Locale
-import           Text.Blaze.Html5            hiding (dt)
+import           Text.Blaze.Html5            hiding (dt, (!?))
 import qualified Text.Blaze.Html5            as H
 import           Text.Blaze.Html5.Attributes hiding (id)
 import qualified Text.Blaze.Html5.Attributes as A
-import           Text.Blaze.Internal         (Attributable, text, textValue)
+import           Text.Blaze.Internal         (Attributable)
 
 import           Text.Textualism.Types
 
@@ -92,14 +91,15 @@ writeBlock cfg bl =
       writeS = mapM_ (writeSpan cfg)
       mkId = A.id . toValue . mappend (idPrefix cfg)
   in case bl of
-    BPar l ss          -> p !? (mkId <$> l) $ writeS ss
+    BAligned al l ls -> pre !? (mkId <$> l)
+                            !  class_ (textValue . mappend "aligned "
+                                       $ align al)
+                            $ sequence_ . L.intersperse (toHtml '\n')
+                              $ fmap writeS ls
     BHeader lvl l _ ss -> hn lvl !? (mkId <$> l) $ writeS ss
-    BQuote l cit cnt   -> div !? (mkId <$> l)
-                              ! class_ (textValue "blockquote")
-                              $ do
-                                blockquote $ writeB cnt
-                                p ! class_ (textValue "blockquote-citation")
-                                  $ writeS cit
+    BHLine           -> hr
+    BList _ _ _      -> error "Bug at Text.Textualism.Writers.Html.writeBlock: \
+                               \BList handling not implemented."
     BLit l cs t      -> ((highlighter cfg) cs t) !? (mkId <$> l)
     BMath l t        -> case mathRenderer cfg of
       MathJaxTex -> div !? (mkId <$> l)
@@ -108,12 +108,13 @@ writeBlock cfg bl =
                                   ! customAttribute "mode"
                                                     (textValue "display")
                                   $ toHtml t
-    BAligned al l ls -> pre !? (mkId <$> l)
-                            !  class_ (textValue . mappend "aligned "
-                                       $ align al)
-                            $ sequence_ . L.intersperse (toHtml '\n')
-                              $ fmap writeS ls
-    BHLine           -> hr
+    BPar l ss          -> p !? (mkId <$> l) $ writeS ss
+    BQuote l cit cnt   -> div !? (mkId <$> l)
+                              ! class_ (textValue "blockquote")
+                              $ do
+                                blockquote $ writeB cnt
+                                p ! class_ (textValue "blockquote-citation")
+                                  $ writeS cit
 
 writeSpan :: WriterOptions -> Span -> Html
 writeSpan cfg s =

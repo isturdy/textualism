@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TupleSections     #-}
@@ -8,7 +9,7 @@ module Text.Textualism.Parser (
   ) where
 
 import           Control.Applicative
-import           Control.Lens
+import           Control.Lens          hiding (noneOf)
 import           Control.Monad
 import           Data.Bifunctor
 import           Data.Char
