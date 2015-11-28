@@ -141,7 +141,7 @@ pMeta = option mempty $
 pBlock :: Parser [RBlock]
 pBlock = filter notNil <$> sepBy (block <* many blankline) indentSame
   where block = pBlockRef <|> pBlockQuote <|> pBlockLit <|> pHeader
-            <|> pAligned <|> pLine <|> pBlockMath <|> pBlockPar
+            <|> pAligned <|> pLine <|> pBlockMath <|> pBlockPar <|> pBlockList
 
 -- Parse a sequence of blocks at a new (higher) indentation, and remove the
 -- indent.
@@ -205,6 +205,12 @@ pBlockRef = RBNil <$ (join . try $ char '[' *>
          <|> ((addLink <$ char '@') <*> (pIdString <* string "]:" <* litspaces)
                                     <*> (pack <$> (many1 $ noneOf "\r\n"))
                                     <*  char '\n')))
+
+pBlockList :: Parser RBlock
+pBlockList = RBList <$> ((Ordered <$ char '#') <|> (Unordered <$ char '+'))
+                   <*> optionMaybe pIdString
+                   <*> content
+  where content = undefined
 
 -- Span parsers
 pSpans :: Parser [RSpan]

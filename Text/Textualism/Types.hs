@@ -56,6 +56,11 @@ data RBlock = RBHeader {
                 rLabel    :: Maybe Text
               , rContentT :: Text
               }
+            | RBList {
+                rListType :: ListType
+              , rLabel    :: Maybe Text
+              , rList     :: RList
+              }
             | RBHLine
             | RBNil
             deriving (Show)
@@ -72,6 +77,14 @@ data Label = Label {
 type FNId = Either Int Text
 
 type Url = Text
+
+data ListType = Ordered
+              | Unordered
+              deriving (Eq, Show)
+
+data RList = RLBlock [RBlock]
+           | RLSpan [RSpan]
+           deriving (Show)
 
 data RSpan = RSQuote (Maybe Text) [RSpan]
            | RSLit [Text] Text
