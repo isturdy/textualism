@@ -172,7 +172,7 @@ pBlockLit = RBLit <$> (pBlockSym "```" *> pBlockLabel)
 
 pBlockQuote :: Parser RBlock
 pBlockQuote = RBQuote <$> (pBlockSym ">" *> pBlockLabel)
-                      <*> (pSpans <* eol)
+                      <*> (optionMaybe pSpans <* eol)
                       <*> pNewBlock
 
 pBlockPar :: Parser RBlock

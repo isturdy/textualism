@@ -40,7 +40,7 @@ data RBlock = RBHeader {
               }
             | RBQuote {
                 rLabel    :: Maybe Text
-              , rCitation :: [RSpan]
+              , rCitation :: Maybe [RSpan]
               , rContentB :: [RBlock]
               }
             | RBPar {
@@ -119,7 +119,7 @@ data Block = BPar {
              }
            | BQuote {
                label    :: Maybe Text
-             , citation :: [Span]
+             , citation :: Maybe [Span]
              , contentB :: [Block]
              }
            | BLit {

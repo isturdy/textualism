@@ -109,12 +109,10 @@ writeBlock cfg bl =
                                                     (textValue "display")
                                   $ toHtml t
     BPar l ss          -> p !? (mkId <$> l) $ writeS ss
-    BQuote l cit cnt   -> div !? (mkId <$> l)
-                              ! class_ (textValue "blockquote")
-                              $ do
-                                blockquote $ writeB cnt
-                                p ! class_ (textValue "blockquote-citation")
-                                  $ writeS cit
+    BQuote l cit cnt   -> blockquote !? (mkId <$> l)
+                                     $ do
+                                        writeB cnt
+                                        maybe mempty (H.cite . writeS) cit
 
 writeSpan :: WriterOptions -> Span -> Html
 writeSpan cfg s =

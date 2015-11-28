@@ -68,7 +68,9 @@ normBlock fnp b =
     RBNil             -> error "Bug at Text.Textualism.Normalize.normBlock: \
                                \RBNil escaped parser."
     RBPar l ss        -> BPar l <$> normS ss
-    RBQuote l c bs    -> BQuote l <$> normS c <*> normB bs
+    RBQuote l c bs    -> BQuote l <$> maybe (return Nothing)
+                                            (fmap Just . normS) c
+                                  <*> normB bs
 
 normSpan :: Bool -> RSpan -> Norm Span
 normSpan fnp s =
