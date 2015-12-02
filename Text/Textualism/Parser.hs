@@ -155,13 +155,12 @@ pNewLines = (:) <$> (indentNew *> pSpans <* optional eol)
 
 pIndentedLines :: Parser Text
 pIndentedLines = (+1) <$> getIndent >>= \i ->
-  adjustIndents <$> sepEndBy (line i <|> (mempty <$ blankline)) eol
-  where line i = pack <$> (try (count i litspace)
-                           *> many (noneOf "\r\n"))
+  adjustIndents <$> sepEndBy (line i <|> (mempty <$ many space)) eol
+  where line i = pack <$> (try (count i litspace) *> many (noneOf "\r\n"))
         adjustIndents [] = ""
         adjustIndents ls = T.unlines $ T.drop minIndent <$> ls
-          where minIndent = L.minimum $ fromMaybe maxBound
-                                      . T.findIndex (/=' ') <$> ls
+          where minIndent = L.minimum $
+                            fromMaybe maxBound . T.findIndex (/= ' ') <$> ls
 
 -- Literal block. Note the non-standard indentation
 -- (to allow for first-line indents)
